@@ -34,7 +34,7 @@ async function loadEnv() {
     const separatorIndex = trimmedLine.indexOf('=');
     if (separatorIndex === -1) continue;
     const key = trimmedLine.slice(0, separatorIndex);
-    const value = trimmedLine.slice(separatorIndex + 1);
+    const value = trimmedLine.slice(separatorIndex + 1).trim();
     if (process.env[key] === undefined) process.env[key] = value;
   }
 }
@@ -76,19 +76,28 @@ function publicUser(user) {
 }
 
 function hasSupabaseAuth() {
-  return Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+  return Boolean(getSupabaseUrl() && getSupabaseServiceRoleKey());
+}
+
+function getSupabaseUrl() {
+  return String(process.env.SUPABASE_URL || '').trim().replace(/\/+$/, '');
+}
+
+function getSupabaseServiceRoleKey() {
+  return String(process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
 }
 
 function supabaseHeaders() {
+  const serviceRoleKey = getSupabaseServiceRoleKey();
   return {
-    apikey: process.env.SUPABASE_SERVICE_ROLE_KEY,
-    Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+    apikey: serviceRoleKey,
+    Authorization: `Bearer ${serviceRoleKey}`,
     'Content-Type': 'application/json'
   };
 }
 
 async function supabaseRequest(pathname, options = {}) {
-  const response = await fetch(`${process.env.SUPABASE_URL}${pathname}`, {
+  const response = await fetch(`${getSupabaseUrl()}${pathname}`, {
     ...options,
     headers: {
       ...supabaseHeaders(),
@@ -122,9 +131,9 @@ async function createSupabaseUser({ email, password, name }) {
 }
 
 async function getSupabaseUserFromToken(accessToken) {
-  const response = await fetch(`${process.env.SUPABASE_URL}/auth/v1/user`, {
+  const response = await fetch(`${getSupabaseUrl()}/auth/v1/user`, {
     headers: {
-      apikey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+      apikey: getSupabaseServiceRoleKey(),
       Authorization: `Bearer ${accessToken}`
     }
   });
@@ -236,7 +245,8 @@ async function handleApi(req, res, url) {
         const user = syncLocalUser(nextDb, auth.user);
         await writeDb(nextDb);
         return sendJson(res, 200, { user: publicUser(user), accessToken: auth.access_token });
-      } catch {
+      } catch (error) {
+        console.error('Supabase login failed:', error.message);
         return sendError(res, 401, 'Credenciales invalidas');
       }
     }
