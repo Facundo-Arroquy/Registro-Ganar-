@@ -11,6 +11,11 @@
       "email": "carlos@ejemplo.com",
       "password": "******",
       "name": "Carlos Ruiz"
+    },
+    {
+      "id": "28a2c49f-1c48-477a-a091-9172d40e1858",
+      "email": "facundoarroquy.w@gmail.com",
+      "name": "facundoarroquy.w"
     }
   ],
   "settings": {

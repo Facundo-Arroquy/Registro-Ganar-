@@ -24,6 +24,21 @@ const contentTypes = {
   '.svg': 'image/svg+xml'
 };
 
+async function loadEnv() {
+  const envPath = path.join(__dirname, '.env');
+  if (!existsSync(envPath)) return;
+  const lines = (await readFile(envPath, 'utf8')).split('\n');
+  for (const line of lines) {
+    const trimmedLine = line.trim();
+    if (!trimmedLine || trimmedLine.startsWith('#')) continue;
+    const separatorIndex = trimmedLine.indexOf('=');
+    if (separatorIndex === -1) continue;
+    const key = trimmedLine.slice(0, separatorIndex);
+    const value = trimmedLine.slice(separatorIndex + 1);
+    if (process.env[key] === undefined) process.env[key] = value;
+  }
+}
+
 async function readDb() {
   return JSON.parse(await readFile(dbPath, 'utf8'));
 }
@@ -58,6 +73,100 @@ function makeId(prefix) {
 
 function publicUser(user) {
   return { id: user.id, email: user.email, name: user.name };
+}
+
+function hasSupabaseAuth() {
+  return Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+}
+
+function supabaseHeaders() {
+  return {
+    apikey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+    Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+    'Content-Type': 'application/json'
+  };
+}
+
+async function supabaseRequest(pathname, options = {}) {
+  const response = await fetch(`${process.env.SUPABASE_URL}${pathname}`, {
+    ...options,
+    headers: {
+      ...supabaseHeaders(),
+      ...(options.headers || {})
+    }
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error_description || data.msg || data.message || 'Supabase no pudo completar la operacion');
+  }
+  return data;
+}
+
+async function signInWithSupabase(email, password) {
+  return supabaseRequest('/auth/v1/token?grant_type=password', {
+    method: 'POST',
+    body: JSON.stringify({ email, password })
+  });
+}
+
+async function createSupabaseUser({ email, password, name }) {
+  return supabaseRequest('/auth/v1/admin/users', {
+    method: 'POST',
+    body: JSON.stringify({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: { name }
+    })
+  });
+}
+
+async function getSupabaseUserFromToken(accessToken) {
+  const response = await fetch(`${process.env.SUPABASE_URL}/auth/v1/user`, {
+    headers: {
+      apikey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${accessToken}`
+    }
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.id || !data.email) return null;
+  return data;
+}
+
+async function requireApiUser(req, res, db) {
+  if (!hasSupabaseAuth()) {
+    sendError(res, 503, 'Supabase Auth no esta configurado');
+    return null;
+  }
+  const authorization = String(req.headers.authorization || '');
+  const match = authorization.match(/^Bearer\s+(.+)$/i);
+  if (!match) {
+    sendError(res, 401, 'Sesion requerida');
+    return null;
+  }
+  const authUser = await getSupabaseUserFromToken(match[1]);
+  if (!authUser) {
+    sendError(res, 401, 'Sesion invalida');
+    return null;
+  }
+  const user = syncLocalUser(db, authUser);
+  return user;
+}
+
+function syncLocalUser(db, authUser, fallbackName = '') {
+  const email = String(authUser.email || '').trim().toLowerCase();
+  const name = String(authUser.user_metadata?.name || fallbackName || email.split('@')[0] || 'Usuario').trim();
+  let user = db.users.find((candidate) => candidate.id === authUser.id || candidate.email.toLowerCase() === email);
+  if (user) {
+    user.id = authUser.id || user.id;
+    user.email = email || user.email;
+    user.name = name || user.name;
+    delete user.password;
+    return user;
+  }
+  user = { id: authUser.id, email, name };
+  db.users.push(user);
+  return user;
 }
 
 function findBoard(db, boardId) {
@@ -119,12 +228,26 @@ async function handleApi(req, res, url) {
   if (req.method === 'POST' && url.pathname === '/api/login') {
     const email = String(body.email || '').trim().toLowerCase();
     const password = String(body.password || '');
-    const user = db.users.find((candidate) => candidate.email.toLowerCase() === email && candidate.password === password);
-    if (!user) return sendError(res, 401, 'Credenciales invalidas');
-    return sendJson(res, 200, { user: publicUser(user) });
+    if (hasSupabaseAuth()) {
+      try {
+        const auth = await signInWithSupabase(email, password);
+        const nextDb = await readDb();
+        ensureSettings(nextDb);
+        const user = syncLocalUser(nextDb, auth.user);
+        await writeDb(nextDb);
+        return sendJson(res, 200, { user: publicUser(user), accessToken: auth.access_token });
+      } catch {
+        return sendError(res, 401, 'Credenciales invalidas');
+      }
+    }
+    return sendError(res, 503, 'Supabase Auth no esta configurado');
   }
 
+  const apiUser = await requireApiUser(req, res, db);
+  if (!apiUser) return;
+
   if (req.method === 'GET' && url.pathname === '/api/bootstrap') {
+    await writeDb(db);
     return sendJson(res, 200, {
       users: db.users.map(publicUser),
       clients: db.clients,
@@ -204,11 +327,23 @@ async function handleApi(req, res, url) {
 
   if (req.method === 'POST' && url.pathname === '/api/users/invitations') {
     const email = String(body.email || '').trim().toLowerCase();
+    const name = String(body.name || email.split('@')[0] || '').trim();
+    const password = String(body.password || '');
     if (!email) return sendError(res, 400, 'El email es obligatorio');
+    if (hasSupabaseAuth() && password.length < 6) return sendError(res, 400, 'La contrasena debe tener al menos 6 caracteres');
     const existing = db.users.find((user) => user.email.toLowerCase() === email);
     if (existing) return sendJson(res, 200, { user: publicUser(existing), invited: false });
-    const user = { id: makeId('u'), email, password: '******', name: email.split('@')[0] };
-    db.users.push(user);
+    let user = { id: makeId('u'), email, password: '******', name };
+    if (hasSupabaseAuth()) {
+      try {
+        const auth = await createSupabaseUser({ email, password, name });
+        user = syncLocalUser(db, auth.user, name);
+      } catch (error) {
+        return sendError(res, 400, error.message);
+      }
+    } else {
+      db.users.push(user);
+    }
     await writeDb(db);
     return sendJson(res, 201, { user: publicUser(user), invited: true });
   }
@@ -416,6 +551,8 @@ server.on('error', (error) => {
   }
   throw error;
 });
+
+await loadEnv();
 
 server.listen(port, () => {
   console.log(`Registro Ganar v0 listo en http://localhost:${port}`);

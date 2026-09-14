@@ -10,11 +10,11 @@ form.addEventListener('submit', async (event) => {
   const password = document.querySelector('#login-password').value;
 
   try {
-    const { user } = await api('/api/login', {
+    const { user, accessToken } = await api('/api/login', {
       method: 'POST',
       body: JSON.stringify({ email, password })
     });
-    setSessionUser(user);
+    setSessionUser(user, accessToken);
     window.location.href = '/dashboard';
   } catch (err) {
     error.textContent = err.message;

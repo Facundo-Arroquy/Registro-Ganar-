@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "create:user": "node scripts/create-supabase-user.js",
     "dev": "node server.js",
     "start": "node server.js"
   },

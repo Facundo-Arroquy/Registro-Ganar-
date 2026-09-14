@@ -222,15 +222,23 @@ function openInviteModal({ onRefresh }) {
   const overlay = openModal(`
     <div class="modal-overlay">
       <form class="modal">
-        <div class="modal-header">Enviar Invitacion</div>
-        <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 12px;">Ingresa el correo del nuevo usuario.</p>
+        <div class="modal-header">Crear Usuario</div>
+        <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 12px;">Crea un usuario inicial en Supabase Auth.</p>
+        <div class="form-group">
+          <label for="invite-name-input">Nombre</label>
+          <input type="text" id="invite-name-input" class="form-control" placeholder="Ej. Ana Gomez">
+        </div>
         <div class="form-group">
           <label for="invite-email-input">Correo Electronico</label>
           <input type="email" id="invite-email-input" class="form-control" placeholder="usuario@correo.com">
         </div>
+        <div class="form-group">
+          <label for="invite-password-input">Contrasena inicial</label>
+          <input type="password" id="invite-password-input" class="form-control" autocomplete="new-password" minlength="6">
+        </div>
         <div class="modal-actions">
           <button class="btn btn-secondary" type="button" data-close-modal>Cancelar</button>
-          <button class="btn" type="submit">Enviar</button>
+          <button class="btn" type="submit">Crear Usuario</button>
         </div>
       </form>
     </div>
@@ -238,9 +246,11 @@ function openInviteModal({ onRefresh }) {
 
   overlay.querySelector('form').addEventListener('submit', async (event) => {
     event.preventDefault();
+    const name = overlay.querySelector('#invite-name-input').value.trim();
     const email = overlay.querySelector('#invite-email-input').value.trim();
-    if (!email) return;
-    await api('/api/users/invitations', { method: 'POST', body: JSON.stringify({ email }) });
+    const password = overlay.querySelector('#invite-password-input').value;
+    if (!name || !email || !password) return;
+    await api('/api/users/invitations', { method: 'POST', body: JSON.stringify({ name, email, password }) });
     closeModal();
     await onRefresh();
   });
