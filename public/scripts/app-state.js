@@ -3,7 +3,7 @@ import { api } from './api.js';
 export async function loadAppState() {
   const data = await api('/api/bootstrap');
   if (isMockModeEnabled()) {
-    const mocks = await api('/api/mocks');
+    const mocks = getStoredMockData() || await api('/api/mocks');
     data.clients = mocks.clients;
     data.boards = mocks.boards;
   }
@@ -29,4 +29,20 @@ export function isMockModeEnabled() {
 
 export function setMockMode(enabled) {
   localStorage.setItem('showMocks', String(enabled));
+  if (!enabled) localStorage.removeItem('mockData');
+}
+
+export function saveMockData({ clients, boards }) {
+  localStorage.setItem('mockData', JSON.stringify({ clients, boards }));
+}
+
+function getStoredMockData() {
+  const raw = localStorage.getItem('mockData');
+  if (!raw) return null;
+  try {
+    const data = JSON.parse(raw);
+    return Array.isArray(data.clients) && Array.isArray(data.boards) ? data : null;
+  } catch {
+    return null;
+  }
 }
