@@ -87,6 +87,17 @@ function getSupabaseServiceRoleKey() {
   return String(process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
 }
 
+function decodeJwtPayload(token) {
+  try {
+    const payload = token.split('.')[1];
+    if (!payload) return null;
+    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+    return JSON.parse(Buffer.from(normalized, 'base64').toString('utf8'));
+  } catch {
+    return null;
+  }
+}
+
 function supabaseHeaders() {
   const serviceRoleKey = getSupabaseServiceRoleKey();
   return {
@@ -251,6 +262,20 @@ async function handleApi(req, res, url) {
       }
     }
     return sendError(res, 503, 'Supabase Auth no esta configurado');
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/auth/diagnostics') {
+    const supabaseUrl = getSupabaseUrl();
+    const serviceRoleKey = getSupabaseServiceRoleKey();
+    const keyPayload = decodeJwtPayload(serviceRoleKey);
+    return sendJson(res, 200, {
+      hasSupabaseUrl: Boolean(supabaseUrl),
+      supabaseHost: supabaseUrl ? new URL(supabaseUrl).host : null,
+      hasServiceRoleKey: Boolean(serviceRoleKey),
+      serviceRoleKeyLength: serviceRoleKey.length,
+      serviceRoleJwtRole: keyPayload?.role || null,
+      serviceRoleJwtRef: keyPayload?.ref || null
+    });
   }
 
   const apiUser = await requireApiUser(req, res, db);
