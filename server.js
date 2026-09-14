@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, 'public');
 const dbPath = path.join(__dirname, 'data', 'db.json');
+const mocksPath = path.join(__dirname, 'data', 'mocks.json');
 const port = Number(process.env.PORT || 3000);
 let statusWriteQueue = Promise.resolve();
 const defaultStatusColors = {
@@ -41,6 +42,10 @@ async function loadEnv() {
 
 async function readDb() {
   return JSON.parse(await readFile(dbPath, 'utf8'));
+}
+
+async function readMocks() {
+  return JSON.parse(await readFile(mocksPath, 'utf8'));
 }
 
 async function writeDb(db) {
@@ -293,6 +298,35 @@ async function handleApi(req, res, url) {
     await tryWriteDb(db);
     return sendJson(res, 200, {
       users: db.users.map(publicUser),
+      clients: db.clients,
+      boards: db.boards,
+      settings: db.settings
+    });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/mocks/show') {
+    const mocks = await readMocks();
+    const primaryUserId = db.users.some((user) => user.id === apiUser.id) ? apiUser.id : db.users[0]?.id || apiUser.id;
+    db.clients = mocks.clients.map((client) => ({
+      ...client,
+      ownerId: db.users.some((user) => user.id === client.ownerId) ? client.ownerId : primaryUserId
+    }));
+    db.boards = mocks.boards.map((board) => ({
+      ...board,
+      columns: board.columns.map((column) => ({ ...column })),
+      cards: board.cards.map((card) => ({
+        ...card,
+        createdBy: db.users.some((user) => user.id === card.createdBy) ? card.createdBy : primaryUserId,
+        assignedTo: db.users.some((user) => user.id === card.assignedTo) ? card.assignedTo : primaryUserId
+      }))
+    }));
+    recordConfigChange(db, body, 'Cargo datos demo');
+    try {
+      await writeDb(db);
+    } catch {
+      return sendError(res, 500, 'No se pudieron guardar los mocks en este entorno');
+    }
+    return sendJson(res, 200, {
       clients: db.clients,
       boards: db.boards,
       settings: db.settings

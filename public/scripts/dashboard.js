@@ -24,6 +24,7 @@ function renderPage() {
     onRefresh: refresh
   });
   document.querySelector('[data-open-client]').onclick = openClientModal;
+  document.querySelector('[data-show-mocks]').onclick = showMocks;
   renderDashboard();
 }
 
@@ -32,6 +33,7 @@ function renderDashboard() {
   const cards = state.boards.flatMap((board) => board.cards);
   document.querySelector('#stat-active-cards').textContent = cards.length;
   document.querySelector('#stat-expired-cards').textContent = cards.filter((card) => getDueDateStatus(card.dueDate)?.status === 'expired').length;
+  document.querySelector('[data-show-mocks]').hidden = state.clients.length > 0 || cards.length > 0;
   document.querySelector('#clients-table-body').innerHTML = state.clients.map((client) => {
     const clientCards = getClientCards(client.id);
     const timedCards = getTimedClientCards(client.id);
@@ -60,6 +62,23 @@ function renderDashboard() {
       openClientModal(state.clients.find((client) => client.id === button.dataset.editClientButton));
     });
   });
+}
+
+async function showMocks() {
+  const button = document.querySelector('[data-show-mocks]');
+  button.disabled = true;
+  button.textContent = 'Cargando...';
+  try {
+    await api('/api/mocks/show', {
+      method: 'POST',
+      body: JSON.stringify({ userId: currentUser.id, userName: currentUser.name })
+    });
+    await refresh();
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = 'Mostrar mocks';
+    alert(error.message);
+  }
 }
 
 function getClientCards(clientId) {

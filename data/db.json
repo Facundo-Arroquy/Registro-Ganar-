@@ -1,18 +1,6 @@
 {
   "users": [
     {
-      "id": "u1",
-      "email": "ana@ejemplo.com",
-      "password": "******",
-      "name": "Ana Gomez"
-    },
-    {
-      "id": "u2",
-      "email": "carlos@ejemplo.com",
-      "password": "******",
-      "name": "Carlos Ruiz"
-    },
-    {
       "id": "28a2c49f-1c48-477a-a091-9172d40e1858",
       "email": "facundoarroquy.w@gmail.com",
       "name": "facundoarroquy.w"
@@ -41,45 +29,10 @@
         "color": "#388bfd"
       }
     ],
-    "lastConfigChange": {
-      "action": "Creo la tarjeta \"Prueba\" en \"Proyecto Principal\"",
-      "userId": "u1",
-      "userName": "Ana Gomez",
-      "at": "2026-09-14T18:33:07.934Z"
-    },
-    "configChanges": [
-      {
-        "action": "Creo la tarjeta \"Prueba\" en \"Proyecto Principal\"",
-        "userId": "u1",
-        "userName": "Ana Gomez",
-        "at": "2026-09-14T18:33:07.934Z"
-      },
-      {
-        "action": "Agrego el estado \"Onboarding\"",
-        "userId": "u1",
-        "userName": "Ana Gomez",
-        "at": "2026-09-14T17:29:35.237Z"
-      }
-    ]
+    "lastConfigChange": null,
+    "configChanges": []
   },
-  "clients": [
-    {
-      "id": "cl1",
-      "name": "Laura Martinez",
-      "company": "TechCorp",
-      "email": "laura@techcorp.com",
-      "ownerId": "u1",
-      "status": "Activo"
-    },
-    {
-      "id": "cl2",
-      "name": "Roberto Gomez",
-      "company": "Global Logistics",
-      "email": "roberto@globallog.com",
-      "ownerId": "u2",
-      "status": "En pausa"
-    }
-  ],
+  "clients": [],
   "boards": [
     {
       "id": "b1",
@@ -107,30 +60,7 @@
           "showTimer": false
         }
       ],
-      "cards": [
-        {
-          "id": "k1",
-          "columnId": "c2",
-          "clientId": "cl1",
-          "title": "Ajustar Login",
-          "description": "Integrar modulo auth y conectar base de datos",
-          "dueDate": "2026-09-18",
-          "createdBy": "u1",
-          "assignedTo": "u2",
-          "enteredColumnAt": 1789405228701
-        },
-        {
-          "id": "k_1789410787934_91b77a",
-          "columnId": "c_1789410502322_9bfce9",
-          "clientId": "",
-          "title": "Prueba",
-          "description": "",
-          "dueDate": "",
-          "createdBy": "u1",
-          "assignedTo": "",
-          "enteredColumnAt": 1789410787934
-        }
-      ]
+      "cards": []
     }
   ]
 }
