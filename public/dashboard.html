@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard | Gemini CRM</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles/app.css">
+</head>
+<body data-page="dashboard">
+  <aside data-sidebar></aside>
+  <main>
+    <div class="dashboard-view">
+      <h1 style="font-size: 1.5rem; font-weight: 700;">Dashboard General</h1>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <h3>Total Clientes</h3>
+          <div class="value" id="stat-total-clients">0</div>
+        </div>
+        <div class="stat-card">
+          <h3>Tarjetas Activas</h3>
+          <div class="value" id="stat-active-cards">0</div>
+        </div>
+        <div class="stat-card">
+          <h3>Tareas Vencidas</h3>
+          <div class="value" id="stat-expired-cards" style="color: var(--due-expired-text);">0</div>
+        </div>
+      </div>
+      <section class="clients-section">
+        <div class="section-header">
+          <h2 style="font-size: 1.1rem; font-weight: 600;">Gestion de Clientes</h2>
+          <button class="btn" type="button" data-open-client>Agregar Cliente</button>
+        </div>
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Nombre</th>
+              <th>Empresa</th>
+              <th>Correo</th>
+              <th>Personal a cargo</th>
+              <th>Estado</th>
+              <th>Tarjetas Asignadas</th>
+              <th>Con Timer</th>
+              <th>Promedio en Timer</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="clients-table-body"></tbody>
+        </table>
+      </section>
+    </div>
+  </main>
+  <div id="modal-root"></div>
+  <script type="module" src="/scripts/dashboard.js"></script>
+</body>
+</html>

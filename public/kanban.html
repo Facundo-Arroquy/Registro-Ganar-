@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kanban | Gemini CRM</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles/app.css">
+</head>
+<body data-page="kanban">
+  <aside data-sidebar></aside>
+  <main>
+    <header>
+      <div class="board-title-container">
+        <div class="board-color-dot" id="current-board-color"></div>
+        <h1 class="board-title" id="current-board-title">Tablero</h1>
+      </div>
+      <div>
+        <button class="btn btn-secondary" type="button" data-open-settings>Configurar</button>
+        <button class="btn btn-secondary" type="button" data-open-column>Nueva Columna</button>
+      </div>
+    </header>
+    <div class="kanban-board" id="kanban-board"></div>
+  </main>
+  <div id="modal-root"></div>
+  <script type="module" src="/scripts/kanban.js"></script>
+</body>
+</html>

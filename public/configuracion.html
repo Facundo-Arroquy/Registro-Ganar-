@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Configuracion | Gemini CRM</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles/app.css">
+</head>
+<body data-page="configuracion">
+  <aside data-sidebar></aside>
+  <main>
+    <div class="dashboard-view">
+      <div class="page-heading">
+        <div>
+          <h1>Configuracion</h1>
+          <p>Estados de clientes e historial de cambios en tableros, columnas y tarjetas.</p>
+        </div>
+      </div>
+
+      <section class="clients-section" id="estados">
+        <div class="section-header">
+          <div>
+            <h2>Estados</h2>
+            <p class="settings-audit" data-last-config-change>Sin cambios registrados</p>
+          </div>
+          <button class="btn" type="button" data-add-status>Agregar Estado</button>
+        </div>
+        <div class="settings-list" data-status-list></div>
+      </section>
+
+      <section class="clients-section">
+        <div class="section-header">
+          <div>
+            <h2>Historial de modificaciones</h2>
+            <p class="settings-audit">Ultimas modificaciones de estados, tableros, columnas y tarjetas</p>
+          </div>
+        </div>
+        <div class="history-list" data-config-history></div>
+      </section>
+    </div>
+  </main>
+  <div id="modal-root"></div>
+  <script type="module" src="/scripts/configuracion.js"></script>
+</body>
+</html>

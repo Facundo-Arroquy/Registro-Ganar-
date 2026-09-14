@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login | Gemini CRM</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles/app.css">
+</head>
+<body>
+  <section class="login-screen">
+    <form class="login-box" id="login-form">
+      <h2 class="brand-title">Gemini CRM</h2>
+      <p class="login-copy">Inicia sesion con tus credenciales</p>
+      <div class="form-group">
+        <label for="login-email">Email</label>
+        <input type="email" id="login-email" class="form-control" value="ana@ejemplo.com" autocomplete="email">
+      </div>
+      <div class="form-group">
+        <label for="login-password">Contrasena</label>
+        <input type="password" id="login-password" class="form-control" value="******" autocomplete="current-password">
+      </div>
+      <button class="btn" type="submit" style="width: 100%; margin-top: 10px;">Ingresar</button>
+      <p class="error-message" id="login-error"></p>
+    </form>
+  </section>
+  <script type="module" src="/scripts/login.js"></script>
+</body>
+</html>

@@ -1,0 +1,1 @@
+-- Seed data is included in the initial migration for this prototype.

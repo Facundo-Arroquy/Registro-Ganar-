@@ -1,0 +1,131 @@
+{
+  "users": [
+    {
+      "id": "u1",
+      "email": "ana@ejemplo.com",
+      "password": "******",
+      "name": "Ana Gomez"
+    },
+    {
+      "id": "u2",
+      "email": "carlos@ejemplo.com",
+      "password": "******",
+      "name": "Carlos Ruiz"
+    }
+  ],
+  "settings": {
+    "clientStatuses": [
+      {
+        "name": "Activo",
+        "color": "#3fb950"
+      },
+      {
+        "name": "En pausa",
+        "color": "#d29922"
+      },
+      {
+        "name": "Riesgo",
+        "color": "#f85149"
+      },
+      {
+        "name": "Cerrado",
+        "color": "#8b949e"
+      },
+      {
+        "name": "Onboarding",
+        "color": "#388bfd"
+      }
+    ],
+    "lastConfigChange": {
+      "action": "Creo la tarjeta \"Prueba\" en \"Proyecto Principal\"",
+      "userId": "u1",
+      "userName": "Ana Gomez",
+      "at": "2026-09-14T18:33:07.934Z"
+    },
+    "configChanges": [
+      {
+        "action": "Creo la tarjeta \"Prueba\" en \"Proyecto Principal\"",
+        "userId": "u1",
+        "userName": "Ana Gomez",
+        "at": "2026-09-14T18:33:07.934Z"
+      },
+      {
+        "action": "Agrego el estado \"Onboarding\"",
+        "userId": "u1",
+        "userName": "Ana Gomez",
+        "at": "2026-09-14T17:29:35.237Z"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "id": "cl1",
+      "name": "Laura Martinez",
+      "company": "TechCorp",
+      "email": "laura@techcorp.com",
+      "ownerId": "u1",
+      "status": "Activo"
+    },
+    {
+      "id": "cl2",
+      "name": "Roberto Gomez",
+      "company": "Global Logistics",
+      "email": "roberto@globallog.com",
+      "ownerId": "u2",
+      "status": "En pausa"
+    }
+  ],
+  "boards": [
+    {
+      "id": "b1",
+      "name": "Proyecto Principal",
+      "color": "#2b52ff",
+      "columns": [
+        {
+          "id": "c1",
+          "name": "Por Hacer",
+          "showTimer": false
+        },
+        {
+          "id": "c2",
+          "name": "En Proceso",
+          "showTimer": true
+        },
+        {
+          "id": "c3",
+          "name": "Completado",
+          "showTimer": false
+        },
+        {
+          "id": "c_1789410502322_9bfce9",
+          "name": "Prueba",
+          "showTimer": false
+        }
+      ],
+      "cards": [
+        {
+          "id": "k1",
+          "columnId": "c2",
+          "clientId": "cl1",
+          "title": "Ajustar Login",
+          "description": "Integrar modulo auth y conectar base de datos",
+          "dueDate": "2026-09-18",
+          "createdBy": "u1",
+          "assignedTo": "u2",
+          "enteredColumnAt": 1789405228701
+        },
+        {
+          "id": "k_1789410787934_91b77a",
+          "columnId": "c_1789410502322_9bfce9",
+          "clientId": "",
+          "title": "Prueba",
+          "description": "",
+          "dueDate": "",
+          "createdBy": "u1",
+          "assignedTo": "",
+          "enteredColumnAt": 1789410787934
+        }
+      ]
+    }
+  ]
+}
