@@ -1,5 +1,5 @@
 import { api, requireSession } from './api.js';
-import { getActiveBoard, loadAppState, setActiveBoard } from './app-state.js';
+import { getActiveBoard, isMockModeEnabled, loadAppState, setActiveBoard } from './app-state.js';
 import { closeModal, openModal, renderSidebar } from './layout.js';
 import { escapeHtml, getDueDateStatus, getInitials, getTimeInColumn } from './utils.js';
 
@@ -101,16 +101,29 @@ function bindKanbanEvents() {
       draggedCardId = card.dataset.cardId;
       draggedColumnId = null;
       event.dataTransfer.setData('type', 'card');
+      event.dataTransfer.effectAllowed = 'move';
+      card.classList.add('dragging');
+    });
+    card.addEventListener('dragend', () => {
+      card.classList.remove('dragging');
+      document.querySelectorAll('.cards-container').forEach((item) => item.classList.remove('card-drag-over'));
+      draggedCardId = null;
     });
   });
   document.querySelectorAll('[data-card-drop]').forEach((drop) => {
     drop.addEventListener('dragover', (event) => {
-      if (draggedCardId) event.preventDefault();
+      if (draggedCardId) {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'move';
+        drop.classList.add('card-drag-over');
+      }
     });
+    drop.addEventListener('dragleave', () => drop.classList.remove('card-drag-over'));
     drop.addEventListener('drop', async (event) => {
       event.preventDefault();
       event.stopPropagation();
       if (!draggedCardId) return;
+      drop.classList.remove('card-drag-over');
       await moveCard(draggedCardId, drop.dataset.cardDrop);
       draggedCardId = null;
     });
@@ -241,6 +254,12 @@ async function moveCard(cardId, columnId) {
   const board = getActiveBoard(state);
   const card = board.cards.find((item) => item.id === cardId);
   if (!card || card.columnId === columnId) return;
+  if (isMockModeEnabled()) {
+    card.columnId = columnId;
+    card.enteredColumnAt = Date.now();
+    renderActiveBoard();
+    return;
+  }
   await api(`/api/boards/${board.id}/cards/${cardId}`, {
     method: 'PATCH',
     body: JSON.stringify({ ...card, columnId, ...auditUser() })

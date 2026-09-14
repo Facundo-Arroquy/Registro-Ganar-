@@ -375,6 +375,12 @@ header {
   flex: 1;
 }
 
+.cards-container.card-drag-over {
+  outline: 2px dashed var(--accent-blue);
+  outline-offset: -6px;
+  background-color: rgba(56, 139, 253, 0.08);
+}
+
 .add-card-btn {
   margin: 8px 12px 12px;
   background: transparent;
@@ -399,6 +405,10 @@ header {
   background-color: var(--bg-card-hover);
   border-color: var(--accent-blue);
   transform: translateY(-2px);
+}
+
+.card.dragging {
+  opacity: 0.55;
 }
 
 .card-title {
