@@ -47,6 +47,14 @@ async function writeDb(db) {
   await writeFile(dbPath, JSON.stringify(db, null, 2));
 }
 
+async function tryWriteDb(db) {
+  try {
+    await writeDb(db);
+  } catch (error) {
+    console.warn('Skipping db persistence:', error.code || error.message);
+  }
+}
+
 function sendJson(res, status, data) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(data));
@@ -254,7 +262,7 @@ async function handleApi(req, res, url) {
         const nextDb = await readDb();
         ensureSettings(nextDb);
         const user = syncLocalUser(nextDb, auth.user);
-        await writeDb(nextDb);
+        await tryWriteDb(nextDb);
         return sendJson(res, 200, { user: publicUser(user), accessToken: auth.access_token });
       } catch (error) {
         console.error('Supabase login failed:', error.message);
@@ -262,17 +270,6 @@ async function handleApi(req, res, url) {
       }
     }
     return sendError(res, 503, 'Supabase Auth no esta configurado');
-  }
-
-  if (req.method === 'POST' && url.pathname === '/api/auth/debug-login') {
-    const email = String(body.email || '').trim().toLowerCase();
-    const password = String(body.password || '');
-    try {
-      const auth = await signInWithSupabase(email, password);
-      return sendJson(res, 200, { ok: true, email: auth.user?.email || null });
-    } catch (error) {
-      return sendJson(res, 200, { ok: false, message: error.message });
-    }
   }
 
   if (req.method === 'GET' && url.pathname === '/api/auth/diagnostics') {
@@ -293,7 +290,7 @@ async function handleApi(req, res, url) {
   if (!apiUser) return;
 
   if (req.method === 'GET' && url.pathname === '/api/bootstrap') {
-    await writeDb(db);
+    await tryWriteDb(db);
     return sendJson(res, 200, {
       users: db.users.map(publicUser),
       clients: db.clients,
