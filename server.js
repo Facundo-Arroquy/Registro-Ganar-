@@ -264,6 +264,17 @@ async function handleApi(req, res, url) {
     return sendError(res, 503, 'Supabase Auth no esta configurado');
   }
 
+  if (req.method === 'POST' && url.pathname === '/api/auth/debug-login') {
+    const email = String(body.email || '').trim().toLowerCase();
+    const password = String(body.password || '');
+    try {
+      const auth = await signInWithSupabase(email, password);
+      return sendJson(res, 200, { ok: true, email: auth.user?.email || null });
+    } catch (error) {
+      return sendJson(res, 200, { ok: false, message: error.message });
+    }
+  }
+
   if (req.method === 'GET' && url.pathname === '/api/auth/diagnostics') {
     const supabaseUrl = getSupabaseUrl();
     const serviceRoleKey = getSupabaseServiceRoleKey();
