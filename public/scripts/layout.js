@@ -1,4 +1,5 @@
 import { api, clearSession } from './api.js';
+import { isMockModeEnabled, setMockMode } from './app-state.js';
 import { escapeHtml, getInitials } from './utils.js';
 
 export function renderSidebar({ state, currentUser, activePage, onRefresh }) {
@@ -18,6 +19,7 @@ export function renderSidebar({ state, currentUser, activePage, onRefresh }) {
     <div class="sidebar-settings">
       <div class="section-title">Configuracion</div>
       <a class="nav-btn ${activePage === 'configuracion' ? 'active' : ''}" href="/configuracion">Configuracion</a>
+      <button class="nav-btn" type="button" data-toggle-mocks>${isMockModeEnabled() ? 'Ocultar mocks' : 'Mostrar mocks'}</button>
     </div>
 
     <div class="user-profile">
@@ -69,6 +71,11 @@ export function renderSidebar({ state, currentUser, activePage, onRefresh }) {
 
   sidebar.querySelector('[data-open-board]').addEventListener('click', () => openBoardModal({ state, currentUser, onRefresh }));
   sidebar.querySelector('[data-open-invite]').addEventListener('click', () => openInviteModal({ onRefresh }));
+  sidebar.querySelector('[data-toggle-mocks]').addEventListener('click', async () => {
+    setMockMode(!isMockModeEnabled());
+    localStorage.removeItem('activeBoardId');
+    await onRefresh();
+  });
 }
 
 async function deleteBoard({ state, currentUser, boardId, onRefresh }) {

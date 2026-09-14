@@ -304,14 +304,14 @@ async function handleApi(req, res, url) {
     });
   }
 
-  if (req.method === 'POST' && url.pathname === '/api/mocks/show') {
+  if (req.method === 'GET' && url.pathname === '/api/mocks') {
     const mocks = await readMocks();
     const primaryUserId = db.users.some((user) => user.id === apiUser.id) ? apiUser.id : db.users[0]?.id || apiUser.id;
-    db.clients = mocks.clients.map((client) => ({
+    const clients = mocks.clients.map((client) => ({
       ...client,
       ownerId: db.users.some((user) => user.id === client.ownerId) ? client.ownerId : primaryUserId
     }));
-    db.boards = mocks.boards.map((board) => ({
+    const boards = mocks.boards.map((board) => ({
       ...board,
       columns: board.columns.map((column) => ({ ...column })),
       cards: board.cards.map((card) => ({
@@ -320,15 +320,9 @@ async function handleApi(req, res, url) {
         assignedTo: db.users.some((user) => user.id === card.assignedTo) ? card.assignedTo : primaryUserId
       }))
     }));
-    recordConfigChange(db, body, 'Cargo datos demo');
-    try {
-      await writeDb(db);
-    } catch {
-      return sendError(res, 500, 'No se pudieron guardar los mocks en este entorno');
-    }
     return sendJson(res, 200, {
-      clients: db.clients,
-      boards: db.boards,
+      clients,
+      boards,
       settings: db.settings
     });
   }
