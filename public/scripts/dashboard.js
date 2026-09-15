@@ -23,7 +23,7 @@ function renderPage() {
     activePage: 'dashboard',
     onRefresh: refresh
   });
-  document.querySelector('[data-open-client]').onclick = openClientModal;
+  document.querySelector('[data-open-client]').onclick = () => openClientModal();
   renderDashboard();
 }
 
