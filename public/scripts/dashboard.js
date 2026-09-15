@@ -52,14 +52,18 @@ function renderDashboard() {
     `;
   }).join('');
   document.querySelectorAll('[data-edit-client]').forEach((row) => {
-    row.addEventListener('click', () => openClientModal(state.clients.find((client) => client.id === row.dataset.editClient)));
+    row.addEventListener('click', () => openClientModal(getClientById(row.dataset.editClient)));
   });
   document.querySelectorAll('[data-edit-client-button]').forEach((button) => {
     button.addEventListener('click', (event) => {
       event.stopPropagation();
-      openClientModal(state.clients.find((client) => client.id === button.dataset.editClientButton));
+      openClientModal(getClientById(button.dataset.editClientButton));
     });
   });
+}
+
+function getClientById(clientId) {
+  return state.clients.find((client) => String(client.id) === String(clientId));
 }
 
 function getClientCards(clientId) {
@@ -123,6 +127,10 @@ function openClientModal(client = null) {
       status: overlay.querySelector('#client-status-input').value
     };
     if (!payload.name || !payload.company) return;
+    if (isEdit && !client.id) {
+      alert('No se pudo identificar el cliente. Actualiza la pagina e intenta de nuevo.');
+      return;
+    }
     await api(isEdit ? `/api/clients/${client.id}` : '/api/clients', {
       method: isEdit ? 'PATCH' : 'POST',
       body: JSON.stringify({ ...payload, ...auditUser() })

@@ -635,9 +635,14 @@ async function handleApi(req, res, url) {
   }
 
   if (segments[0] === 'api' && segments[1] === 'clients' && segments[2]) {
-    const client = hasSupabaseAuth()
-      ? (await getSupabaseState()).clients.find((item) => item.id === segments[2])
-      : db.clients.find((item) => item.id === segments[2]);
+    const requestedClientId = segments[2];
+    const requestedClientEmail = String(body.email || '').trim().toLowerCase();
+    const state = hasSupabaseAuth() ? await getSupabaseState() : null;
+    const clients = state?.clients || db.clients;
+    const client = clients.find((item) => item.id === requestedClientId)
+      || (requestedClientId === 'undefined' && requestedClientEmail
+        ? clients.find((item) => String(item.email || '').trim().toLowerCase() === requestedClientEmail)
+        : null);
     if (!client) return sendError(res, 404, 'Cliente no encontrado');
 
     if (req.method === 'PATCH' && segments.length === 3) {
