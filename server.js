@@ -7,9 +7,9 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, 'public');
 const dbPath = path.join(__dirname, 'data', 'db.json');
-const mocksPath = path.join(__dirname, 'data', 'mocks.json');
 const port = Number(process.env.PORT || 3000);
 let statusWriteQueue = Promise.resolve();
+let supportsStatusColor = true;
 const defaultStatusColors = {
   Activo: '#3fb950',
   'En pausa': '#d29922',
@@ -42,10 +42,6 @@ async function loadEnv() {
 
 async function readDb() {
   return JSON.parse(await readFile(dbPath, 'utf8'));
-}
-
-async function readMocks() {
-  return JSON.parse(await readFile(mocksPath, 'utf8'));
 }
 
 async function writeDb(db) {
@@ -152,9 +148,10 @@ async function supabaseRest(pathname, options = {}) {
 }
 
 async function getSupabaseState() {
-  const [users, statuses, clients, boards, columns, cards] = await Promise.all([
+  const [users, statuses, auditRows, clients, boards, columns, cards] = await Promise.all([
     supabaseRest('/app_users?select=id,email,name&order=name.asc'),
-    supabaseRest('/client_statuses?select=id,name,position&order=position.asc'),
+    getSupabaseStatuses(),
+    supabaseRest('/settings_audit?select=action,user_id,user_name,created_at&order=created_at.desc&limit=50'),
     supabaseRest('/clients?select=id,name,company,email,owner_id,status_id'),
     supabaseRest('/boards?select=id,name,color,position&order=position.asc'),
     supabaseRest('/board_columns?select=id,board_id,name,show_timer,position&order=position.asc'),
@@ -164,9 +161,9 @@ async function getSupabaseState() {
   return {
     users: users.map(publicUser),
     settings: {
-      clientStatuses: statuses.map((status) => normalizeStatus(status.name)),
-      lastConfigChange: null,
-      configChanges: []
+      clientStatuses: statuses.map((status) => normalizeStatus({ name: status.name, color: status.color })),
+      lastConfigChange: auditRows[0] ? mapAuditRow(auditRows[0]) : null,
+      configChanges: auditRows.map(mapAuditRow)
     },
     clients: clients.map((client) => ({
       id: client.id,
@@ -204,6 +201,15 @@ async function getSupabaseState() {
   };
 }
 
+function mapAuditRow(row) {
+  return {
+    action: row.action,
+    userId: row.user_id || '',
+    userName: row.user_name || 'Usuario',
+    at: row.created_at
+  };
+}
+
 async function getStatusIdByName(statusName) {
   const statuses = await supabaseRest(`/client_statuses?select=id,name&name=eq.${encodeURIComponent(statusName || 'Activo')}&limit=1`);
   if (statuses[0]) return statuses[0].id;
@@ -216,6 +222,47 @@ async function getNextColumnPosition(boardId) {
   return Number(columns[0]?.position || 0) + 1;
 }
 
+async function getNextStatusPosition() {
+  const statuses = await supabaseRest('/client_statuses?select=position&order=position.desc&limit=1');
+  return Number(statuses[0]?.position || 0) + 1;
+}
+
+async function getSupabaseStatuses() {
+  if (!supportsStatusColor) {
+    return supabaseRest('/client_statuses?select=id,name,position&order=position.asc');
+  }
+  try {
+    return await supabaseRest('/client_statuses?select=id,name,position,color&order=position.asc');
+  } catch (error) {
+    if (!/color/i.test(error.message)) throw error;
+    supportsStatusColor = false;
+    return supabaseRest('/client_statuses?select=id,name,position&order=position.asc');
+  }
+}
+
+function statusWritePayload(payload) {
+  if (!supportsStatusColor) {
+    const { color, ...rest } = payload;
+    return rest;
+  }
+  return payload;
+}
+
+async function recordSupabaseAudit(body, action) {
+  await supabaseRest('/settings_audit', {
+    method: 'POST',
+    body: JSON.stringify([{
+      action,
+      user_id: body.userId || null,
+      user_name: body.userName || 'Usuario'
+    }])
+  });
+}
+
+async function getSupabaseSettings() {
+  return (await getSupabaseState()).settings;
+}
+
 async function syncSupabaseAppUser(authUser, fallbackName = '') {
   const email = String(authUser.email || '').trim().toLowerCase();
   const name = String(authUser.user_metadata?.name || fallbackName || email.split('@')[0] || 'Usuario').trim();
@@ -225,6 +272,11 @@ async function syncSupabaseAppUser(authUser, fallbackName = '') {
     body: JSON.stringify([{ id: authUser.id, email, name }])
   });
   return { id: authUser.id, email, name };
+}
+
+async function getSupabaseAppUserByEmail(email) {
+  const users = await supabaseRest(`/app_users?select=id,email,name&email=eq.${encodeURIComponent(email)}&limit=1`);
+  return users[0] ? publicUser(users[0]) : null;
 }
 
 async function signInWithSupabase(email, password) {
@@ -401,36 +453,26 @@ async function handleApi(req, res, url) {
     });
   }
 
-  if (req.method === 'GET' && url.pathname === '/api/mocks') {
-    const mocks = await readMocks();
-    const primaryUserId = db.users.some((user) => user.id === apiUser.id) ? apiUser.id : db.users[0]?.id || apiUser.id;
-    const clients = mocks.clients.map((client) => ({
-      ...client,
-      ownerId: db.users.some((user) => user.id === client.ownerId) ? client.ownerId : primaryUserId
-    }));
-    const boards = mocks.boards.map((board) => ({
-      ...board,
-      columns: board.columns.map((column) => ({ ...column })),
-      cards: board.cards.map((card) => ({
-        ...card,
-        createdBy: db.users.some((user) => user.id === card.createdBy) ? card.createdBy : primaryUserId,
-        assignedTo: db.users.some((user) => user.id === card.assignedTo) ? card.assignedTo : primaryUserId
-      }))
-    }));
-    return sendJson(res, 200, {
-      clients,
-      boards,
-      settings: db.settings
-    });
-  }
-
   if (req.method === 'POST' && url.pathname === '/api/settings/client-statuses') {
     return enqueueStatusWrite(async () => {
-      const nextDb = await readDb();
-      ensureSettings(nextDb);
       const status = String(body.status || '').trim();
       const color = isHexColor(body.color) ? String(body.color) : '#388bfd';
       if (!status) return sendError(res, 400, 'El estado es obligatorio');
+      if (hasSupabaseAuth()) {
+        const statuses = await getSupabaseStatuses();
+        if (statuses.some((item) => item.name.toLowerCase() === status.toLowerCase())) {
+          return sendError(res, 400, 'Ese estado ya existe');
+        }
+        await supabaseRest('/client_statuses', {
+          method: 'POST',
+          headers: { Prefer: 'return=representation' },
+          body: JSON.stringify([statusWritePayload({ name: status, color, position: await getNextStatusPosition() })])
+        });
+        await recordSupabaseAudit(body, `Agrego el estado "${status}"`);
+        return sendJson(res, 201, { settings: await getSupabaseSettings() });
+      }
+      const nextDb = await readDb();
+      ensureSettings(nextDb);
       if (nextDb.settings.clientStatuses.some((item) => getStatusName(item).toLowerCase() === status.toLowerCase())) {
         return sendError(res, 400, 'Ese estado ya existe');
       }
@@ -443,12 +485,30 @@ async function handleApi(req, res, url) {
 
   if (segments[0] === 'api' && segments[1] === 'settings' && segments[2] === 'client-statuses' && segments[3]) {
     const index = Number(segments[3]);
-    if (!Number.isInteger(index) || index < 0 || index >= db.settings.clientStatuses.length) {
+    if (!Number.isInteger(index) || index < 0) {
       return sendError(res, 404, 'Estado no encontrado');
     }
 
     if (req.method === 'PATCH') {
       return enqueueStatusWrite(async () => {
+        if (hasSupabaseAuth()) {
+          const statuses = await getSupabaseStatuses();
+          const statusRow = statuses[index];
+          if (!statusRow) return sendError(res, 404, 'Estado no encontrado');
+          const nextStatus = String(body.status || '').trim();
+          const nextColor = isHexColor(body.color) ? String(body.color) : normalizeStatus(statusRow).color;
+          if (!nextStatus) return sendError(res, 400, 'El estado es obligatorio');
+          const duplicateStatus = statuses.some((item, itemIndex) => (
+            itemIndex !== index && item.name.toLowerCase() === nextStatus.toLowerCase()
+          ));
+          if (duplicateStatus) return sendError(res, 400, 'Ese estado ya existe');
+          await supabaseRest(`/client_statuses?id=eq.${encodeURIComponent(statusRow.id)}`, {
+            method: 'PATCH',
+            body: JSON.stringify(statusWritePayload({ name: nextStatus, color: nextColor }))
+          });
+          await recordSupabaseAudit(body, `Edito el estado "${statusRow.name}" a "${nextStatus}"`);
+          return sendJson(res, 200, { settings: await getSupabaseSettings() });
+        }
         const nextDb = await readDb();
         ensureSettings(nextDb);
         if (index < 0 || index >= nextDb.settings.clientStatuses.length) {
@@ -474,6 +534,20 @@ async function handleApi(req, res, url) {
 
     if (req.method === 'DELETE') {
       return enqueueStatusWrite(async () => {
+        if (hasSupabaseAuth()) {
+          const statuses = await getSupabaseStatuses();
+          const statusRow = statuses[index];
+          if (!statusRow) return sendError(res, 404, 'Estado no encontrado');
+          if (statuses.length <= 1) return sendError(res, 400, 'Debe conservarse al menos un estado');
+          const fallbackStatus = statuses.find((item) => item.id !== statusRow.id);
+          await supabaseRest(`/clients?status_id=eq.${encodeURIComponent(statusRow.id)}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ status_id: fallbackStatus.id })
+          });
+          await supabaseRest(`/client_statuses?id=eq.${encodeURIComponent(statusRow.id)}`, { method: 'DELETE' });
+          await recordSupabaseAudit(body, `Saco el estado "${statusRow.name}"`);
+          return sendJson(res, 200, { settings: await getSupabaseSettings() });
+        }
         const nextDb = await readDb();
         ensureSettings(nextDb);
         if (index < 0 || index >= nextDb.settings.clientStatuses.length) {
@@ -498,22 +572,25 @@ async function handleApi(req, res, url) {
     const name = String(body.name || email.split('@')[0] || '').trim();
     const password = String(body.password || '');
     if (!email) return sendError(res, 400, 'El email es obligatorio');
-    if (hasSupabaseAuth() && password.length < 6) return sendError(res, 400, 'La contrasena debe tener al menos 6 caracteres');
-    const existing = db.users.find((user) => user.email.toLowerCase() === email);
+    const existing = hasSupabaseAuth()
+      ? await getSupabaseAppUserByEmail(email)
+      : db.users.find((user) => user.email.toLowerCase() === email);
     if (existing) return sendJson(res, 200, { user: publicUser(existing), invited: false });
+    if (hasSupabaseAuth() && password.length < 6) return sendError(res, 400, 'La contrasena debe tener al menos 6 caracteres');
     let user = { id: makeId('u'), email, password: '******', name };
     if (hasSupabaseAuth()) {
       try {
         const auth = await createSupabaseUser({ email, password, name });
         await syncSupabaseAppUser(auth.user, name);
         user = syncLocalUser(db, auth.user, name);
+        await recordSupabaseAudit(body, `Creo el usuario "${email}"`);
       } catch (error) {
         return sendError(res, 400, error.message);
       }
     } else {
       db.users.push(user);
     }
-    await writeDb(db);
+    await tryWriteDb(db);
     return sendJson(res, 201, { user: publicUser(user), invited: true });
   }
 
@@ -541,6 +618,7 @@ async function handleApi(req, res, url) {
           status_id: statusId
         }])
       });
+      await recordSupabaseAudit(body, `Creo el cliente "${client.name}"`);
       return sendJson(res, 201, { client: { ...client, id: createdClient.id } });
     }
     db.clients.push(client);
@@ -576,6 +654,7 @@ async function handleApi(req, res, url) {
             status_id: statusId
           })
         });
+        await recordSupabaseAudit(body, `Modifico el cliente "${client.name}"`);
         return sendJson(res, 200, { client: { id: client.id, ...payload } });
       }
       client.name = body.name === undefined ? client.name : String(body.name).trim();
@@ -610,6 +689,7 @@ async function handleApi(req, res, url) {
         headers: { Prefer: 'return=representation' },
         body: JSON.stringify([{ id: board.columns[0].id, board_id: board.id, name: board.columns[0].name, show_timer: false, position: 1 }])
       });
+      await recordSupabaseAudit(body, `Creo el tablero "${name}"`);
       return sendJson(res, 201, { board });
     }
     const board = {
@@ -640,6 +720,7 @@ async function handleApi(req, res, url) {
           headers: { Prefer: 'return=representation' },
           body: JSON.stringify({ name })
         });
+        await recordSupabaseAudit(body, `Renombro el tablero "${board.name}" a "${name}"`);
         return sendJson(res, 200, { board: { ...board, name } });
       }
       const previousName = board.name;
@@ -654,6 +735,7 @@ async function handleApi(req, res, url) {
         const state = await getSupabaseState();
         if (state.boards.length <= 1) return sendError(res, 400, 'Debe conservarse al menos un tablero');
         await supabaseRest(`/boards?id=eq.${encodeURIComponent(board.id)}`, { method: 'DELETE' });
+        await recordSupabaseAudit(body, `Elimino el tablero "${board.name}"`);
         return sendJson(res, 200, { boards: state.boards.filter((item) => item.id !== board.id) });
       }
       if (db.boards.length <= 1) return sendError(res, 400, 'Debe conservarse al menos un tablero');
@@ -681,6 +763,7 @@ async function handleApi(req, res, url) {
           }])
         });
         board.columns.push(column);
+        await recordSupabaseAudit(body, `Creo la columna "${name}" en "${board.name}"`);
         return sendJson(res, 201, { column, board });
       }
       board.columns.push(column);
@@ -698,6 +781,7 @@ async function handleApi(req, res, url) {
           body: JSON.stringify({ position: index + 1 })
         })));
         board.columns = columnIds.map((id) => board.columns.find((column) => column.id === id)).filter(Boolean);
+        await recordSupabaseAudit(body, `Reordeno columnas en "${board.name}"`);
         return sendJson(res, 200, { board });
       }
       board.columns = columnIds.map((id) => board.columns.find((column) => column.id === id)).filter(Boolean);
@@ -711,8 +795,10 @@ async function handleApi(req, res, url) {
       if (board.columns.length <= 1) return sendError(res, 400, 'Debe conservarse al menos una columna');
       if (board.cards.some((card) => card.columnId === columnId)) return sendError(res, 400, 'La columna contiene tarjetas');
       if (hasSupabaseAuth()) {
+        const column = board.columns.find((item) => item.id === columnId);
         await supabaseRest(`/board_columns?id=eq.${encodeURIComponent(columnId)}`, { method: 'DELETE' });
         board.columns = board.columns.filter((column) => column.id !== columnId);
+        await recordSupabaseAudit(body, `Elimino la columna "${column?.name || columnId}" de "${board.name}"`);
         return sendJson(res, 200, { board });
       }
       const column = board.columns.find((item) => item.id === columnId);
@@ -755,6 +841,7 @@ async function handleApi(req, res, url) {
           }])
         });
         board.cards.push(card);
+        await recordSupabaseAudit(body, `Creo la tarjeta "${title}" en "${board.name}"`);
         return sendJson(res, 201, { card, board });
       }
       board.cards.push(card);
@@ -793,6 +880,13 @@ async function handleApi(req, res, url) {
             entered_column_at: new Date(card.enteredColumnAt).toISOString()
           })
         });
+        if (previousColumnId !== card.columnId) {
+          const fromColumn = board.columns.find((column) => column.id === previousColumnId);
+          const toColumn = board.columns.find((column) => column.id === card.columnId);
+          await recordSupabaseAudit(body, `Movio la tarjeta "${card.title}" de "${fromColumn?.name || previousColumnId}" a "${toColumn?.name || card.columnId}"`);
+        } else {
+          await recordSupabaseAudit(body, `Modifico la tarjeta "${previousTitle}" en "${board.name}"`);
+        }
         return sendJson(res, 200, { card, board });
       }
       if (previousColumnId !== card.columnId) {
@@ -811,6 +905,7 @@ async function handleApi(req, res, url) {
       if (hasSupabaseAuth()) {
         await supabaseRest(`/cards?id=eq.${encodeURIComponent(segments[4])}`, { method: 'DELETE' });
         board.cards = board.cards.filter((card) => card.id !== segments[4]);
+        await recordSupabaseAudit(body, `Elimino la tarjeta "${card?.title || segments[4]}" de "${board.name}"`);
         return sendJson(res, 200, { board });
       }
       board.cards = board.cards.filter((card) => card.id !== segments[4]);

@@ -1,5 +1,5 @@
 import { api, requireSession } from './api.js';
-import { getActiveBoard, isMockModeEnabled, loadAppState, saveMockData, setActiveBoard } from './app-state.js';
+import { getActiveBoard, loadAppState, setActiveBoard } from './app-state.js';
 import { closeModal, openModal, renderSidebar } from './layout.js';
 import { escapeHtml, getDueDateStatus, getInitials, getTimeInColumn } from './utils.js';
 
@@ -179,13 +179,6 @@ async function openColumnModal() {
     const board = getActiveBoard(state);
     const name = overlay.querySelector('#column-name-input').value.trim();
     if (!name || !board) return;
-    if (isMockModeEnabled()) {
-      board.columns.push({ id: makeId('c'), name, showTimer: overlay.querySelector('#column-timer-toggle').checked });
-      persistMockState();
-      closeModal();
-      renderPage();
-      return;
-    }
     await api(`/api/boards/${board.id}/columns`, {
       method: 'POST',
       body: JSON.stringify({ name, showTimer: overlay.querySelector('#column-timer-toggle').checked, ...auditUser() })
@@ -244,17 +237,6 @@ async function saveCard(columnId, card) {
     ...auditUser()
   };
   if (!payload.title) return;
-  if (isMockModeEnabled()) {
-    if (card) {
-      Object.assign(card, payload);
-    } else {
-      board.cards.push({ id: makeId('k'), ...payload, enteredColumnAt: Date.now() });
-    }
-    persistMockState();
-    closeModal();
-    renderPage();
-    return;
-  }
   const path = card ? `/api/boards/${board.id}/cards/${card.id}` : `/api/boards/${board.id}/cards`;
   await api(path, { method: card ? 'PATCH' : 'POST', body: JSON.stringify(payload) });
   closeModal();
@@ -263,13 +245,6 @@ async function saveCard(columnId, card) {
 
 async function deleteCard(cardId) {
   const board = getActiveBoard(state);
-  if (isMockModeEnabled()) {
-    board.cards = board.cards.filter((card) => card.id !== cardId);
-    persistMockState();
-    closeModal();
-    renderPage();
-    return;
-  }
   await api(`/api/boards/${board.id}/cards/${cardId}`, { method: 'DELETE', body: JSON.stringify(auditUser()) });
   closeModal();
   await refresh();
@@ -279,13 +254,6 @@ async function moveCard(cardId, columnId) {
   const board = getActiveBoard(state);
   const card = board.cards.find((item) => item.id === cardId);
   if (!card || card.columnId === columnId) return;
-  if (isMockModeEnabled()) {
-    card.columnId = columnId;
-    card.enteredColumnAt = Date.now();
-    persistMockState();
-    renderActiveBoard();
-    return;
-  }
   await api(`/api/boards/${board.id}/cards/${cardId}`, {
     method: 'PATCH',
     body: JSON.stringify({ ...card, columnId, ...auditUser() })
@@ -300,12 +268,6 @@ async function moveColumn(originId, targetId) {
   const targetIndex = columns.findIndex((column) => column.id === targetId);
   const [movedColumn] = columns.splice(originIndex, 1);
   columns.splice(targetIndex, 0, movedColumn);
-  if (isMockModeEnabled()) {
-    board.columns = columns;
-    persistMockState();
-    renderActiveBoard();
-    return;
-  }
   await api(`/api/boards/${board.id}/columns/order`, {
     method: 'PATCH',
     body: JSON.stringify({ columnIds: columns.map((column) => column.id), ...auditUser() })
@@ -319,12 +281,6 @@ async function deleteColumn(columnId) {
   if (board.columns.length <= 1) return alert('El tablero debe conservar al menos una columna.');
   if (cardsInColumn.length > 0) return alert('No puedes eliminar una columna que contiene tarjetas.');
   if (!confirm('Seguro que deseas eliminar esta columna?')) return;
-  if (isMockModeEnabled()) {
-    board.columns = board.columns.filter((column) => column.id !== columnId);
-    persistMockState();
-    renderPage();
-    return;
-  }
   await api(`/api/boards/${board.id}/columns/${columnId}`, { method: 'DELETE', body: JSON.stringify(auditUser()) });
   await refresh();
 }
@@ -353,13 +309,6 @@ function openBoardSettings() {
     event.preventDefault();
     const name = overlay.querySelector('#setting-board-name').value.trim();
     if (!name) return;
-    if (isMockModeEnabled()) {
-      board.name = name;
-      persistMockState();
-      closeModal();
-      renderPage();
-      return;
-    }
     await api(`/api/boards/${board.id}`, {
       method: 'PATCH',
       body: JSON.stringify({ name, ...auditUser() })
@@ -369,14 +318,6 @@ function openBoardSettings() {
   });
   overlay.querySelector('[data-delete-board]').addEventListener('click', async () => {
     if (state.boards.length <= 1) return alert('Debes conservar al menos un tablero.');
-    if (isMockModeEnabled()) {
-      state.boards = state.boards.filter((item) => item.id !== board.id);
-      localStorage.setItem('activeBoardId', state.boards[0]?.id || '');
-      persistMockState();
-      closeModal();
-      renderPage();
-      return;
-    }
     await api(`/api/boards/${board.id}`, { method: 'DELETE', body: JSON.stringify(auditUser()) });
     closeModal();
     state = await loadAppState();
@@ -399,14 +340,6 @@ function userOptions(selectedId = '') {
 
 function auditUser() {
   return { userId: currentUser.id, userName: currentUser.name };
-}
-
-function persistMockState() {
-  saveMockData({ clients: state.clients, boards: state.boards });
-}
-
-function makeId(prefix) {
-  return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
 }
 
 boot();

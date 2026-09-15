@@ -1,5 +1,4 @@
 import { api, clearSession } from './api.js';
-import { isMockModeEnabled, saveMockData, setMockMode } from './app-state.js';
 import { escapeHtml, getInitials } from './utils.js';
 
 export function renderSidebar({ state, currentUser, activePage, onRefresh }) {
@@ -19,7 +18,6 @@ export function renderSidebar({ state, currentUser, activePage, onRefresh }) {
     <div class="sidebar-settings">
       <div class="section-title">Configuracion</div>
       <a class="nav-btn ${activePage === 'configuracion' ? 'active' : ''}" href="/configuracion">Configuracion</a>
-      <button class="nav-btn" type="button" data-toggle-mocks>${isMockModeEnabled() ? 'Ocultar mocks' : 'Mostrar mocks'}</button>
     </div>
 
     <div class="user-profile">
@@ -71,11 +69,6 @@ export function renderSidebar({ state, currentUser, activePage, onRefresh }) {
 
   sidebar.querySelector('[data-open-board]').addEventListener('click', () => openBoardModal({ state, currentUser, onRefresh }));
   sidebar.querySelector('[data-open-invite]').addEventListener('click', () => openInviteModal({ onRefresh }));
-  sidebar.querySelector('[data-toggle-mocks]').addEventListener('click', async () => {
-    setMockMode(!isMockModeEnabled());
-    localStorage.removeItem('activeBoardId');
-    await onRefresh();
-  });
 }
 
 async function deleteBoard({ state, currentUser, boardId, onRefresh }) {
@@ -212,22 +205,6 @@ function openBoardModal({ state, currentUser, onRefresh }) {
     event.preventDefault();
     const name = overlay.querySelector('#board-name-input').value.trim();
     if (!name) return;
-    if (isMockModeEnabled()) {
-      const board = {
-        id: makeId('b'),
-        name,
-        color: '#2b52ff',
-        columns: [{ id: makeId('c'), name: 'Pendiente', showTimer: false }],
-        cards: []
-      };
-      state.boards.push(board);
-      saveMockData({ clients: state.clients, boards: state.boards });
-      state.activeBoardId = board.id;
-      localStorage.setItem('activeBoardId', board.id);
-      closeModal();
-      window.location.href = '/kanban';
-      return;
-    }
     const { board } = await api('/api/boards', { method: 'POST', body: JSON.stringify({ name, ...auditUser(currentUser) }) });
     state.activeBoardId = board.id;
     localStorage.setItem('activeBoardId', board.id);
@@ -239,10 +216,6 @@ function openBoardModal({ state, currentUser, onRefresh }) {
 
 function auditUser(currentUser) {
   return { userId: currentUser.id, userName: currentUser.name };
-}
-
-function makeId(prefix) {
-  return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
 }
 
 function openInviteModal({ onRefresh }) {

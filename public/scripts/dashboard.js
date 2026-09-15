@@ -1,5 +1,5 @@
 import { api, requireSession } from './api.js';
-import { isMockModeEnabled, loadAppState, saveMockData } from './app-state.js';
+import { loadAppState } from './app-state.js';
 import { closeModal, openModal, renderSidebar } from './layout.js';
 import { escapeHtml, getDueDateStatus } from './utils.js';
 
@@ -123,17 +123,6 @@ function openClientModal(client = null) {
       status: overlay.querySelector('#client-status-input').value
     };
     if (!payload.name || !payload.company) return;
-    if (isMockModeEnabled()) {
-      if (client) {
-        Object.assign(client, payload);
-      } else {
-        state.clients.push({ id: makeId('cl'), ...payload });
-      }
-      saveMockData({ clients: state.clients, boards: state.boards });
-      closeModal();
-      renderPage();
-      return;
-    }
     await api(isEdit ? `/api/clients/${client.id}` : '/api/clients', {
       method: isEdit ? 'PATCH' : 'POST',
       body: JSON.stringify(payload)
@@ -184,10 +173,6 @@ function statusBadge(status) {
 
 function isHexColor(color) {
   return /^#[0-9a-fA-F]{6}$/.test(String(color || ''));
-}
-
-function makeId(prefix) {
-  return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
 }
 
 boot();
