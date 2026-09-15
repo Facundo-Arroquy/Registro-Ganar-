@@ -135,6 +135,98 @@ async function supabaseRequest(pathname, options = {}) {
   return data;
 }
 
+async function supabaseRest(pathname, options = {}) {
+  const response = await fetch(`${getSupabaseUrl()}/rest/v1${pathname}`, {
+    ...options,
+    headers: {
+      ...supabaseHeaders(),
+      ...(options.headers || {})
+    }
+  });
+  const text = await response.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!response.ok) {
+    throw new Error(data?.message || data?.hint || 'Supabase no pudo completar la operacion');
+  }
+  return data;
+}
+
+async function getSupabaseState() {
+  const [users, statuses, clients, boards, columns, cards] = await Promise.all([
+    supabaseRest('/app_users?select=id,email,name&order=name.asc'),
+    supabaseRest('/client_statuses?select=id,name,position&order=position.asc'),
+    supabaseRest('/clients?select=id,name,company,email,owner_id,status_id'),
+    supabaseRest('/boards?select=id,name,color,position&order=position.asc'),
+    supabaseRest('/board_columns?select=id,board_id,name,show_timer,position&order=position.asc'),
+    supabaseRest('/cards?select=id,board_id,column_id,client_id,title,description,due_date,created_by,assigned_to,entered_column_at')
+  ]);
+  const statusById = new Map(statuses.map((status) => [status.id, status]));
+  return {
+    users: users.map(publicUser),
+    settings: {
+      clientStatuses: statuses.map((status) => normalizeStatus(status.name)),
+      lastConfigChange: null,
+      configChanges: []
+    },
+    clients: clients.map((client) => ({
+      id: client.id,
+      name: client.name,
+      company: client.company,
+      email: client.email || '',
+      ownerId: client.owner_id || '',
+      status: statusById.get(client.status_id)?.name || 'Activo'
+    })),
+    boards: boards.map((board) => ({
+      id: board.id,
+      name: board.name,
+      color: board.color || '#2b52ff',
+      columns: columns
+        .filter((column) => column.board_id === board.id)
+        .map((column) => ({
+          id: column.id,
+          name: column.name,
+          showTimer: Boolean(column.show_timer)
+        })),
+      cards: cards
+        .filter((card) => card.board_id === board.id)
+        .map((card) => ({
+          id: card.id,
+          columnId: card.column_id,
+          clientId: card.client_id || '',
+          title: card.title,
+          description: card.description || '',
+          dueDate: card.due_date || '',
+          createdBy: card.created_by || '',
+          assignedTo: card.assigned_to || '',
+          enteredColumnAt: new Date(card.entered_column_at).getTime()
+        }))
+    }))
+  };
+}
+
+async function getStatusIdByName(statusName) {
+  const statuses = await supabaseRest(`/client_statuses?select=id,name&name=eq.${encodeURIComponent(statusName || 'Activo')}&limit=1`);
+  if (statuses[0]) return statuses[0].id;
+  const fallback = await supabaseRest('/client_statuses?select=id,name&order=position.asc&limit=1');
+  return fallback[0]?.id;
+}
+
+async function getNextColumnPosition(boardId) {
+  const columns = await supabaseRest(`/board_columns?select=position&board_id=eq.${encodeURIComponent(boardId)}&order=position.desc&limit=1`);
+  return Number(columns[0]?.position || 0) + 1;
+}
+
+async function syncSupabaseAppUser(authUser, fallbackName = '') {
+  const email = String(authUser.email || '').trim().toLowerCase();
+  const name = String(authUser.user_metadata?.name || fallbackName || email.split('@')[0] || 'Usuario').trim();
+  await supabaseRest('/app_users?on_conflict=id', {
+    method: 'POST',
+    headers: { Prefer: 'resolution=merge-duplicates' },
+    body: JSON.stringify([{ id: authUser.id, email, name }])
+  });
+  return { id: authUser.id, email, name };
+}
+
 async function signInWithSupabase(email, password) {
   return supabaseRequest('/auth/v1/token?grant_type=password', {
     method: 'POST',
@@ -182,6 +274,7 @@ async function requireApiUser(req, res, db) {
     sendError(res, 401, 'Sesion invalida');
     return null;
   }
+  await syncSupabaseAppUser(authUser);
   const user = syncLocalUser(db, authUser);
   return user;
 }
@@ -266,6 +359,7 @@ async function handleApi(req, res, url) {
         const auth = await signInWithSupabase(email, password);
         const nextDb = await readDb();
         ensureSettings(nextDb);
+        await syncSupabaseAppUser(auth.user);
         const user = syncLocalUser(nextDb, auth.user);
         await tryWriteDb(nextDb);
         return sendJson(res, 200, { user: publicUser(user), accessToken: auth.access_token });
@@ -295,6 +389,9 @@ async function handleApi(req, res, url) {
   if (!apiUser) return;
 
   if (req.method === 'GET' && url.pathname === '/api/bootstrap') {
+    if (hasSupabaseAuth()) {
+      return sendJson(res, 200, await getSupabaseState());
+    }
     await tryWriteDb(db);
     return sendJson(res, 200, {
       users: db.users.map(publicUser),
@@ -408,6 +505,7 @@ async function handleApi(req, res, url) {
     if (hasSupabaseAuth()) {
       try {
         const auth = await createSupabaseUser({ email, password, name });
+        await syncSupabaseAppUser(auth.user, name);
         user = syncLocalUser(db, auth.user, name);
       } catch (error) {
         return sendError(res, 400, error.message);
@@ -429,16 +527,57 @@ async function handleApi(req, res, url) {
       status: String(body.status || 'Activo').trim()
     };
     if (!client.name || !client.company) return sendError(res, 400, 'Nombre y empresa son obligatorios');
+    if (hasSupabaseAuth()) {
+      const statusId = await getStatusIdByName(client.status);
+      const [createdClient] = await supabaseRest('/clients', {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify([{
+          id: client.id,
+          name: client.name,
+          company: client.company,
+          email: client.email || null,
+          owner_id: client.ownerId || null,
+          status_id: statusId
+        }])
+      });
+      return sendJson(res, 201, { client: { ...client, id: createdClient.id } });
+    }
     db.clients.push(client);
     await writeDb(db);
     return sendJson(res, 201, { client });
   }
 
   if (segments[0] === 'api' && segments[1] === 'clients' && segments[2]) {
-    const client = db.clients.find((item) => item.id === segments[2]);
+    const client = hasSupabaseAuth()
+      ? (await getSupabaseState()).clients.find((item) => item.id === segments[2])
+      : db.clients.find((item) => item.id === segments[2]);
     if (!client) return sendError(res, 404, 'Cliente no encontrado');
 
     if (req.method === 'PATCH' && segments.length === 3) {
+      if (hasSupabaseAuth()) {
+        const payload = {
+          name: body.name === undefined ? client.name : String(body.name).trim(),
+          company: body.company === undefined ? client.company : String(body.company).trim(),
+          email: body.email === undefined ? client.email : String(body.email).trim(),
+          ownerId: body.ownerId === undefined ? client.ownerId || '' : String(body.ownerId),
+          status: body.status === undefined ? client.status || 'Activo' : String(body.status || 'Activo').trim()
+        };
+        if (!payload.name || !payload.company) return sendError(res, 400, 'Nombre y empresa son obligatorios');
+        const statusId = await getStatusIdByName(payload.status);
+        await supabaseRest(`/clients?id=eq.${encodeURIComponent(client.id)}`, {
+          method: 'PATCH',
+          headers: { Prefer: 'return=representation' },
+          body: JSON.stringify({
+            name: payload.name,
+            company: payload.company,
+            email: payload.email || null,
+            owner_id: payload.ownerId || null,
+            status_id: statusId
+          })
+        });
+        return sendJson(res, 200, { client: { id: client.id, ...payload } });
+      }
       client.name = body.name === undefined ? client.name : String(body.name).trim();
       client.company = body.company === undefined ? client.company : String(body.company).trim();
       client.email = body.email === undefined ? client.email : String(body.email).trim();
@@ -453,6 +592,26 @@ async function handleApi(req, res, url) {
   if (req.method === 'POST' && url.pathname === '/api/boards') {
     const name = String(body.name || '').trim();
     if (!name) return sendError(res, 400, 'El nombre es obligatorio');
+    if (hasSupabaseAuth()) {
+      const board = {
+        id: makeId('b'),
+        name,
+        color: '#2b52ff',
+        columns: [{ id: makeId('c'), name: 'Pendiente', showTimer: false }],
+        cards: []
+      };
+      await supabaseRest('/boards', {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify([{ id: board.id, name: board.name, color: board.color, position: 1 }])
+      });
+      await supabaseRest('/board_columns', {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify([{ id: board.columns[0].id, board_id: board.id, name: board.columns[0].name, show_timer: false, position: 1 }])
+      });
+      return sendJson(res, 201, { board });
+    }
     const board = {
       id: makeId('b'),
       name,
@@ -467,12 +626,22 @@ async function handleApi(req, res, url) {
   }
 
   if (segments[0] === 'api' && segments[1] === 'boards' && segments[2]) {
-    const board = findBoard(db, segments[2]);
+    const board = hasSupabaseAuth()
+      ? (await getSupabaseState()).boards.find((item) => item.id === segments[2])
+      : findBoard(db, segments[2]);
     if (!board) return sendError(res, 404, 'Tablero no encontrado');
 
     if (req.method === 'PATCH' && segments.length === 3) {
       const name = String(body.name || '').trim();
       if (!name) return sendError(res, 400, 'El nombre es obligatorio');
+      if (hasSupabaseAuth()) {
+        await supabaseRest(`/boards?id=eq.${encodeURIComponent(board.id)}`, {
+          method: 'PATCH',
+          headers: { Prefer: 'return=representation' },
+          body: JSON.stringify({ name })
+        });
+        return sendJson(res, 200, { board: { ...board, name } });
+      }
       const previousName = board.name;
       board.name = name;
       recordConfigChange(db, body, `Renombro el tablero "${previousName}" a "${name}"`);
@@ -481,6 +650,12 @@ async function handleApi(req, res, url) {
     }
 
     if (req.method === 'DELETE' && segments.length === 3) {
+      if (hasSupabaseAuth()) {
+        const state = await getSupabaseState();
+        if (state.boards.length <= 1) return sendError(res, 400, 'Debe conservarse al menos un tablero');
+        await supabaseRest(`/boards?id=eq.${encodeURIComponent(board.id)}`, { method: 'DELETE' });
+        return sendJson(res, 200, { boards: state.boards.filter((item) => item.id !== board.id) });
+      }
       if (db.boards.length <= 1) return sendError(res, 400, 'Debe conservarse al menos un tablero');
       const boardName = board.name;
       db.boards = db.boards.filter((item) => item.id !== board.id);
@@ -493,6 +668,21 @@ async function handleApi(req, res, url) {
       const name = String(body.name || '').trim();
       if (!name) return sendError(res, 400, 'El nombre es obligatorio');
       const column = { id: makeId('c'), name, showTimer: Boolean(body.showTimer) };
+      if (hasSupabaseAuth()) {
+        await supabaseRest('/board_columns', {
+          method: 'POST',
+          headers: { Prefer: 'return=representation' },
+          body: JSON.stringify([{
+            id: column.id,
+            board_id: board.id,
+            name: column.name,
+            show_timer: column.showTimer,
+            position: await getNextColumnPosition(board.id)
+          }])
+        });
+        board.columns.push(column);
+        return sendJson(res, 201, { column, board });
+      }
       board.columns.push(column);
       recordConfigChange(db, body, `Creo la columna "${name}" en "${board.name}"`);
       await writeDb(db);
@@ -502,6 +692,14 @@ async function handleApi(req, res, url) {
     if (req.method === 'PATCH' && segments[3] === 'columns' && segments[4] === 'order') {
       const columnIds = Array.isArray(body.columnIds) ? body.columnIds : [];
       if (columnIds.length !== board.columns.length) return sendError(res, 400, 'Orden de columnas invalido');
+      if (hasSupabaseAuth()) {
+        await Promise.all(columnIds.map((id, index) => supabaseRest(`/board_columns?id=eq.${encodeURIComponent(id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ position: index + 1 })
+        })));
+        board.columns = columnIds.map((id) => board.columns.find((column) => column.id === id)).filter(Boolean);
+        return sendJson(res, 200, { board });
+      }
       board.columns = columnIds.map((id) => board.columns.find((column) => column.id === id)).filter(Boolean);
       recordConfigChange(db, body, `Reordeno columnas en "${board.name}"`);
       await writeDb(db);
@@ -512,6 +710,11 @@ async function handleApi(req, res, url) {
       const columnId = segments[4];
       if (board.columns.length <= 1) return sendError(res, 400, 'Debe conservarse al menos una columna');
       if (board.cards.some((card) => card.columnId === columnId)) return sendError(res, 400, 'La columna contiene tarjetas');
+      if (hasSupabaseAuth()) {
+        await supabaseRest(`/board_columns?id=eq.${encodeURIComponent(columnId)}`, { method: 'DELETE' });
+        board.columns = board.columns.filter((column) => column.id !== columnId);
+        return sendJson(res, 200, { board });
+      }
       const column = board.columns.find((item) => item.id === columnId);
       board.columns = board.columns.filter((column) => column.id !== columnId);
       recordConfigChange(db, body, `Elimino la columna "${column?.name || columnId}" de "${board.name}"`);
@@ -534,6 +737,26 @@ async function handleApi(req, res, url) {
         enteredColumnAt: Date.now()
       };
       if (!board.columns.some((column) => column.id === card.columnId)) return sendError(res, 400, 'Columna invalida');
+      if (hasSupabaseAuth()) {
+        await supabaseRest('/cards', {
+          method: 'POST',
+          headers: { Prefer: 'return=representation' },
+          body: JSON.stringify([{
+            id: card.id,
+            board_id: board.id,
+            column_id: card.columnId,
+            client_id: card.clientId || null,
+            title: card.title,
+            description: card.description,
+            due_date: card.dueDate || null,
+            created_by: card.createdBy || null,
+            assigned_to: card.assignedTo || null,
+            entered_column_at: new Date(card.enteredColumnAt).toISOString()
+          }])
+        });
+        board.cards.push(card);
+        return sendJson(res, 201, { card, board });
+      }
       board.cards.push(card);
       recordConfigChange(db, body, `Creo la tarjeta "${title}" en "${board.name}"`);
       await writeDb(db);
@@ -556,6 +779,22 @@ async function handleApi(req, res, url) {
       if (!card.title) return sendError(res, 400, 'El titulo es obligatorio');
       if (!board.columns.some((column) => column.id === card.columnId)) return sendError(res, 400, 'Columna invalida');
       if (previousColumnId !== card.columnId) card.enteredColumnAt = Date.now();
+      if (hasSupabaseAuth()) {
+        await supabaseRest(`/cards?id=eq.${encodeURIComponent(card.id)}`, {
+          method: 'PATCH',
+          headers: { Prefer: 'return=representation' },
+          body: JSON.stringify({
+            column_id: card.columnId,
+            client_id: card.clientId || null,
+            title: card.title,
+            description: card.description,
+            due_date: card.dueDate || null,
+            assigned_to: card.assignedTo || null,
+            entered_column_at: new Date(card.enteredColumnAt).toISOString()
+          })
+        });
+        return sendJson(res, 200, { card, board });
+      }
       if (previousColumnId !== card.columnId) {
         const fromColumn = board.columns.find((column) => column.id === previousColumnId);
         const toColumn = board.columns.find((column) => column.id === card.columnId);
@@ -569,6 +808,11 @@ async function handleApi(req, res, url) {
 
     if (req.method === 'DELETE' && segments[3] === 'cards' && segments[4]) {
       const card = board.cards.find((item) => item.id === segments[4]);
+      if (hasSupabaseAuth()) {
+        await supabaseRest(`/cards?id=eq.${encodeURIComponent(segments[4])}`, { method: 'DELETE' });
+        board.cards = board.cards.filter((card) => card.id !== segments[4]);
+        return sendJson(res, 200, { board });
+      }
       board.cards = board.cards.filter((card) => card.id !== segments[4]);
       recordConfigChange(db, body, `Elimino la tarjeta "${card?.title || segments[4]}" de "${board.name}"`);
       await writeDb(db);
