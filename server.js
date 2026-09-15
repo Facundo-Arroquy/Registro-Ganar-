@@ -259,6 +259,14 @@ async function recordSupabaseAudit(body, action) {
   });
 }
 
+async function tryRecordSupabaseAudit(body, action) {
+  try {
+    await recordSupabaseAudit(body, action);
+  } catch (error) {
+    console.warn('Skipping audit persistence:', error.message);
+  }
+}
+
 async function getSupabaseSettings() {
   return (await getSupabaseState()).settings;
 }
@@ -468,7 +476,7 @@ async function handleApi(req, res, url) {
           headers: { Prefer: 'return=representation' },
           body: JSON.stringify([statusWritePayload({ name: status, color, position: await getNextStatusPosition() })])
         });
-        await recordSupabaseAudit(body, `Agrego el estado "${status}"`);
+        await tryRecordSupabaseAudit(body, `Agrego el estado "${status}"`);
         return sendJson(res, 201, { settings: await getSupabaseSettings() });
       }
       const nextDb = await readDb();
@@ -506,7 +514,7 @@ async function handleApi(req, res, url) {
             method: 'PATCH',
             body: JSON.stringify(statusWritePayload({ name: nextStatus, color: nextColor }))
           });
-          await recordSupabaseAudit(body, `Edito el estado "${statusRow.name}" a "${nextStatus}"`);
+          await tryRecordSupabaseAudit(body, `Edito el estado "${statusRow.name}" a "${nextStatus}"`);
           return sendJson(res, 200, { settings: await getSupabaseSettings() });
         }
         const nextDb = await readDb();
@@ -545,7 +553,7 @@ async function handleApi(req, res, url) {
             body: JSON.stringify({ status_id: fallbackStatus.id })
           });
           await supabaseRest(`/client_statuses?id=eq.${encodeURIComponent(statusRow.id)}`, { method: 'DELETE' });
-          await recordSupabaseAudit(body, `Saco el estado "${statusRow.name}"`);
+          await tryRecordSupabaseAudit(body, `Saco el estado "${statusRow.name}"`);
           return sendJson(res, 200, { settings: await getSupabaseSettings() });
         }
         const nextDb = await readDb();
@@ -583,7 +591,7 @@ async function handleApi(req, res, url) {
         const auth = await createSupabaseUser({ email, password, name });
         await syncSupabaseAppUser(auth.user, name);
         user = syncLocalUser(db, auth.user, name);
-        await recordSupabaseAudit(body, `Creo el usuario "${email}"`);
+        await tryRecordSupabaseAudit(body, `Creo el usuario "${email}"`);
       } catch (error) {
         return sendError(res, 400, error.message);
       }
@@ -618,7 +626,7 @@ async function handleApi(req, res, url) {
           status_id: statusId
         }])
       });
-      await recordSupabaseAudit(body, `Creo el cliente "${client.name}"`);
+      await tryRecordSupabaseAudit(body, `Creo el cliente "${client.name}"`);
       return sendJson(res, 201, { client: { ...client, id: createdClient.id } });
     }
     db.clients.push(client);
@@ -654,7 +662,7 @@ async function handleApi(req, res, url) {
             status_id: statusId
           })
         });
-        await recordSupabaseAudit(body, `Modifico el cliente "${client.name}"`);
+        await tryRecordSupabaseAudit(body, `Modifico el cliente "${client.name}"`);
         return sendJson(res, 200, { client: { id: client.id, ...payload } });
       }
       client.name = body.name === undefined ? client.name : String(body.name).trim();
@@ -689,7 +697,7 @@ async function handleApi(req, res, url) {
         headers: { Prefer: 'return=representation' },
         body: JSON.stringify([{ id: board.columns[0].id, board_id: board.id, name: board.columns[0].name, show_timer: false, position: 1 }])
       });
-      await recordSupabaseAudit(body, `Creo el tablero "${name}"`);
+      await tryRecordSupabaseAudit(body, `Creo el tablero "${name}"`);
       return sendJson(res, 201, { board });
     }
     const board = {
@@ -720,7 +728,7 @@ async function handleApi(req, res, url) {
           headers: { Prefer: 'return=representation' },
           body: JSON.stringify({ name })
         });
-        await recordSupabaseAudit(body, `Renombro el tablero "${board.name}" a "${name}"`);
+        await tryRecordSupabaseAudit(body, `Renombro el tablero "${board.name}" a "${name}"`);
         return sendJson(res, 200, { board: { ...board, name } });
       }
       const previousName = board.name;
@@ -735,7 +743,7 @@ async function handleApi(req, res, url) {
         const state = await getSupabaseState();
         if (state.boards.length <= 1) return sendError(res, 400, 'Debe conservarse al menos un tablero');
         await supabaseRest(`/boards?id=eq.${encodeURIComponent(board.id)}`, { method: 'DELETE' });
-        await recordSupabaseAudit(body, `Elimino el tablero "${board.name}"`);
+        await tryRecordSupabaseAudit(body, `Elimino el tablero "${board.name}"`);
         return sendJson(res, 200, { boards: state.boards.filter((item) => item.id !== board.id) });
       }
       if (db.boards.length <= 1) return sendError(res, 400, 'Debe conservarse al menos un tablero');
@@ -763,7 +771,7 @@ async function handleApi(req, res, url) {
           }])
         });
         board.columns.push(column);
-        await recordSupabaseAudit(body, `Creo la columna "${name}" en "${board.name}"`);
+        await tryRecordSupabaseAudit(body, `Creo la columna "${name}" en "${board.name}"`);
         return sendJson(res, 201, { column, board });
       }
       board.columns.push(column);
@@ -781,7 +789,7 @@ async function handleApi(req, res, url) {
           body: JSON.stringify({ position: index + 1 })
         })));
         board.columns = columnIds.map((id) => board.columns.find((column) => column.id === id)).filter(Boolean);
-        await recordSupabaseAudit(body, `Reordeno columnas en "${board.name}"`);
+        await tryRecordSupabaseAudit(body, `Reordeno columnas en "${board.name}"`);
         return sendJson(res, 200, { board });
       }
       board.columns = columnIds.map((id) => board.columns.find((column) => column.id === id)).filter(Boolean);
@@ -798,7 +806,7 @@ async function handleApi(req, res, url) {
         const column = board.columns.find((item) => item.id === columnId);
         await supabaseRest(`/board_columns?id=eq.${encodeURIComponent(columnId)}`, { method: 'DELETE' });
         board.columns = board.columns.filter((column) => column.id !== columnId);
-        await recordSupabaseAudit(body, `Elimino la columna "${column?.name || columnId}" de "${board.name}"`);
+        await tryRecordSupabaseAudit(body, `Elimino la columna "${column?.name || columnId}" de "${board.name}"`);
         return sendJson(res, 200, { board });
       }
       const column = board.columns.find((item) => item.id === columnId);
@@ -841,7 +849,7 @@ async function handleApi(req, res, url) {
           }])
         });
         board.cards.push(card);
-        await recordSupabaseAudit(body, `Creo la tarjeta "${title}" en "${board.name}"`);
+        await tryRecordSupabaseAudit(body, `Creo la tarjeta "${title}" en "${board.name}"`);
         return sendJson(res, 201, { card, board });
       }
       board.cards.push(card);
@@ -883,9 +891,9 @@ async function handleApi(req, res, url) {
         if (previousColumnId !== card.columnId) {
           const fromColumn = board.columns.find((column) => column.id === previousColumnId);
           const toColumn = board.columns.find((column) => column.id === card.columnId);
-          await recordSupabaseAudit(body, `Movio la tarjeta "${card.title}" de "${fromColumn?.name || previousColumnId}" a "${toColumn?.name || card.columnId}"`);
+          await tryRecordSupabaseAudit(body, `Movio la tarjeta "${card.title}" de "${fromColumn?.name || previousColumnId}" a "${toColumn?.name || card.columnId}"`);
         } else {
-          await recordSupabaseAudit(body, `Modifico la tarjeta "${previousTitle}" en "${board.name}"`);
+          await tryRecordSupabaseAudit(body, `Modifico la tarjeta "${previousTitle}" en "${board.name}"`);
         }
         return sendJson(res, 200, { card, board });
       }
@@ -905,7 +913,7 @@ async function handleApi(req, res, url) {
       if (hasSupabaseAuth()) {
         await supabaseRest(`/cards?id=eq.${encodeURIComponent(segments[4])}`, { method: 'DELETE' });
         board.cards = board.cards.filter((card) => card.id !== segments[4]);
-        await recordSupabaseAudit(body, `Elimino la tarjeta "${card?.title || segments[4]}" de "${board.name}"`);
+        await tryRecordSupabaseAudit(body, `Elimino la tarjeta "${card?.title || segments[4]}" de "${board.name}"`);
         return sendJson(res, 200, { board });
       }
       board.cards = board.cards.filter((card) => card.id !== segments[4]);

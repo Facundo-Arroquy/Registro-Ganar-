@@ -125,7 +125,7 @@ function openClientModal(client = null) {
     if (!payload.name || !payload.company) return;
     await api(isEdit ? `/api/clients/${client.id}` : '/api/clients', {
       method: isEdit ? 'PATCH' : 'POST',
-      body: JSON.stringify(payload)
+      body: JSON.stringify({ ...payload, ...auditUser() })
     });
     closeModal();
     await refresh();
@@ -173,6 +173,10 @@ function statusBadge(status) {
 
 function isHexColor(color) {
   return /^#[0-9a-fA-F]{6}$/.test(String(color || ''));
+}
+
+function auditUser() {
+  return { userId: currentUser.id, userName: currentUser.name };
 }
 
 boot();
