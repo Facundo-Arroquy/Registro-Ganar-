@@ -201,10 +201,13 @@ function openBoardModal({ state, currentUser, onRefresh }) {
     </div>
   `);
 
+  let submitting = false;
   overlay.querySelector('form').addEventListener('submit', async (event) => {
     event.preventDefault();
+    if (submitting) return;
     const name = overlay.querySelector('#board-name-input').value.trim();
     if (!name) return;
+    submitting = true;
     const { board } = await api('/api/boards', { method: 'POST', body: JSON.stringify({ name, ...auditUser(currentUser) }) });
     state.activeBoardId = board.id;
     localStorage.setItem('activeBoardId', board.id);
@@ -244,12 +247,15 @@ function openInviteModal({ onRefresh }) {
     </div>
   `);
 
+  let submitting = false;
   overlay.querySelector('form').addEventListener('submit', async (event) => {
     event.preventDefault();
+    if (submitting) return;
     const name = overlay.querySelector('#invite-name-input').value.trim();
     const email = overlay.querySelector('#invite-email-input').value.trim();
     const password = overlay.querySelector('#invite-password-input').value;
     if (!name || !email || !password) return;
+    submitting = true;
     await api('/api/users/invitations', { method: 'POST', body: JSON.stringify({ name, email, password }) });
     closeModal();
     await onRefresh();

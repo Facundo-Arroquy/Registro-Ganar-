@@ -117,8 +117,10 @@ function openClientModal(client = null) {
       </form>
     </div>
   `);
+  let submitting = false;
   overlay.querySelector('form').addEventListener('submit', async (event) => {
     event.preventDefault();
+    if (submitting) return;
     const payload = {
       name: overlay.querySelector('#client-name-input').value.trim(),
       company: overlay.querySelector('#client-company-input').value.trim(),
@@ -131,6 +133,7 @@ function openClientModal(client = null) {
       alert('No se pudo identificar el cliente. Actualiza la pagina e intenta de nuevo.');
       return;
     }
+    submitting = true;
     await api(isEdit ? `/api/clients/${client.id}` : '/api/clients', {
       method: isEdit ? 'PATCH' : 'POST',
       body: JSON.stringify({ ...payload, ...auditUser() })

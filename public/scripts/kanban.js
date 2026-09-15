@@ -174,11 +174,14 @@ async function openColumnModal() {
       </form>
     </div>
   `);
+  let submitting = false;
   overlay.querySelector('form').addEventListener('submit', async (event) => {
     event.preventDefault();
+    if (submitting) return;
     const board = getActiveBoard(state);
     const name = overlay.querySelector('#column-name-input').value.trim();
     if (!name || !board) return;
+    submitting = true;
     await api(`/api/boards/${board.id}/columns`, {
       method: 'POST',
       body: JSON.stringify({ name, showTimer: overlay.querySelector('#column-timer-toggle').checked, ...auditUser() })
@@ -209,8 +212,11 @@ function openCardModal(columnId, card = null) {
       </form>
     </div>
   `);
+  let submitting = false;
   overlay.querySelector('form').addEventListener('submit', async (event) => {
     event.preventDefault();
+    if (submitting) return;
+    submitting = true;
     await saveCard(columnId, card);
   });
   overlay.querySelector('[data-delete-card]')?.addEventListener('click', async () => {
@@ -305,10 +311,13 @@ function openBoardSettings() {
       </form>
     </div>
   `);
+  let submitting = false;
   overlay.querySelector('form').addEventListener('submit', async (event) => {
     event.preventDefault();
+    if (submitting) return;
     const name = overlay.querySelector('#setting-board-name').value.trim();
     if (!name) return;
+    submitting = true;
     await api(`/api/boards/${board.id}`, {
       method: 'PATCH',
       body: JSON.stringify({ name, ...auditUser() })
