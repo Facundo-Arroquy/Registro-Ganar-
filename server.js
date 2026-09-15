@@ -222,6 +222,11 @@ async function getNextColumnPosition(boardId) {
   return Number(columns[0]?.position || 0) + 1;
 }
 
+async function getNextBoardPosition() {
+  const boards = await supabaseRest('/boards?select=position&order=position.desc&limit=1');
+  return Number(boards[0]?.position || 0) + 1;
+}
+
 async function getNextStatusPosition() {
   const statuses = await supabaseRest('/client_statuses?select=position&order=position.desc&limit=1');
   return Number(statuses[0]?.position || 0) + 1;
@@ -636,13 +641,9 @@ async function handleApi(req, res, url) {
 
   if (segments[0] === 'api' && segments[1] === 'clients' && segments[2]) {
     const requestedClientId = segments[2];
-    const requestedClientEmail = String(body.email || '').trim().toLowerCase();
     const state = hasSupabaseAuth() ? await getSupabaseState() : null;
     const clients = state?.clients || db.clients;
-    const client = clients.find((item) => item.id === requestedClientId)
-      || (requestedClientId === 'undefined' && requestedClientEmail
-        ? clients.find((item) => String(item.email || '').trim().toLowerCase() === requestedClientEmail)
-        : null);
+    const client = clients.find((item) => item.id === requestedClientId);
     if (!client) return sendError(res, 404, 'Cliente no encontrado');
 
     if (req.method === 'PATCH' && segments.length === 3) {
@@ -695,7 +696,7 @@ async function handleApi(req, res, url) {
       await supabaseRest('/boards', {
         method: 'POST',
         headers: { Prefer: 'return=representation' },
-        body: JSON.stringify([{ id: board.id, name: board.name, color: board.color, position: 1 }])
+        body: JSON.stringify([{ id: board.id, name: board.name, color: board.color, position: await getNextBoardPosition() }])
       });
       await supabaseRest('/board_columns', {
         method: 'POST',
@@ -789,6 +790,11 @@ async function handleApi(req, res, url) {
       const columnIds = Array.isArray(body.columnIds) ? body.columnIds : [];
       if (columnIds.length !== board.columns.length) return sendError(res, 400, 'Orden de columnas invalido');
       if (hasSupabaseAuth()) {
+        const offset = 10000;
+        await Promise.all(columnIds.map((id, index) => supabaseRest(`/board_columns?id=eq.${encodeURIComponent(id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ position: index + 1 + offset })
+        })));
         await Promise.all(columnIds.map((id, index) => supabaseRest(`/board_columns?id=eq.${encodeURIComponent(id)}`, {
           method: 'PATCH',
           body: JSON.stringify({ position: index + 1 })
