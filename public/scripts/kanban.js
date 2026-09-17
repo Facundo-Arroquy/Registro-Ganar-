@@ -7,6 +7,7 @@ const currentUser = requireSession();
 let state;
 let draggedCardId = null;
 let draggedColumnId = null;
+let boardWriteQueue = Promise.resolve();
 
 async function boot() {
   state = await loadAppState();
@@ -260,11 +261,19 @@ async function moveCard(cardId, columnId) {
   const board = getActiveBoard(state);
   const card = board.cards.find((item) => item.id === cardId);
   if (!card || card.columnId === columnId) return;
-  await api(`/api/boards/${board.id}/cards/${cardId}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ ...card, columnId, ...auditUser() })
-  });
-  await refresh();
+  const payload = { ...card, columnId, ...auditUser() };
+  card.columnId = columnId;
+  card.enteredColumnAt = Date.now();
+  renderActiveBoard();
+  try {
+    await enqueueBoardWrite(() => api(`/api/boards/${board.id}/cards/${cardId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload)
+    }));
+  } catch (error) {
+    alert(error.message);
+    await refresh();
+  }
 }
 
 async function moveColumn(originId, targetId) {
@@ -274,11 +283,17 @@ async function moveColumn(originId, targetId) {
   const targetIndex = columns.findIndex((column) => column.id === targetId);
   const [movedColumn] = columns.splice(originIndex, 1);
   columns.splice(targetIndex, 0, movedColumn);
-  await api(`/api/boards/${board.id}/columns/order`, {
-    method: 'PATCH',
-    body: JSON.stringify({ columnIds: columns.map((column) => column.id), ...auditUser() })
-  });
-  await refresh();
+  board.columns = columns;
+  renderActiveBoard();
+  try {
+    await enqueueBoardWrite(() => api(`/api/boards/${board.id}/columns/order`, {
+      method: 'PATCH',
+      body: JSON.stringify({ columnIds: columns.map((column) => column.id), ...auditUser() })
+    }));
+  } catch (error) {
+    alert(error.message);
+    await refresh();
+  }
 }
 
 async function deleteColumn(columnId) {
@@ -345,6 +360,12 @@ function userOptions(selectedId = '') {
   return `<option value="">Sin Asignar</option>${state.users.map((user) => `
     <option value="${escapeHtml(user.id)}" ${user.id === selectedId ? 'selected' : ''}>${escapeHtml(user.name)}</option>
   `).join('')}`;
+}
+
+function enqueueBoardWrite(operation) {
+  const result = boardWriteQueue.then(operation, operation);
+  boardWriteQueue = result.catch(() => {});
+  return result;
 }
 
 function auditUser() {

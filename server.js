@@ -272,8 +272,68 @@ async function tryRecordSupabaseAudit(body, action) {
   }
 }
 
+function recordAuditInBackground(body, action) {
+  const task = tryRecordSupabaseAudit(body, action);
+  // On Vercel, keep the function alive until the audit write finishes (same hook @vercel/functions waitUntil uses).
+  const requestContext = globalThis[Symbol.for('@vercel/request-context')]?.get?.();
+  requestContext?.waitUntil?.(task);
+}
+
 async function getSupabaseSettings() {
-  return (await getSupabaseState()).settings;
+  const [statuses, auditRows] = await Promise.all([
+    getSupabaseStatuses(),
+    supabaseRest('/settings_audit?select=action,user_id,user_name,created_at&order=created_at.desc&limit=50')
+  ]);
+  return {
+    clientStatuses: statuses.map((status) => normalizeStatus({ name: status.name, color: status.color })),
+    lastConfigChange: auditRows[0] ? mapAuditRow(auditRows[0]) : null,
+    configChanges: auditRows.map(mapAuditRow)
+  };
+}
+
+async function getSupabaseClient(clientId) {
+  const [client] = await supabaseRest(`/clients?select=id,name,company,email,owner_id,status:client_statuses(name)&id=eq.${encodeURIComponent(clientId)}&limit=1`);
+  if (!client) return null;
+  return {
+    id: client.id,
+    name: client.name,
+    company: client.company,
+    email: client.email || '',
+    ownerId: client.owner_id || '',
+    status: client.status?.name || 'Activo'
+  };
+}
+
+async function getSupabaseBoard(boardId) {
+  const encodedId = encodeURIComponent(boardId);
+  const [boards, columns, cards] = await Promise.all([
+    supabaseRest(`/boards?select=id,name,color&id=eq.${encodedId}&limit=1`),
+    supabaseRest(`/board_columns?select=id,name,show_timer&board_id=eq.${encodedId}&order=position.asc`),
+    supabaseRest(`/cards?select=id,column_id,client_id,title,description,due_date,created_by,assigned_to,entered_column_at&board_id=eq.${encodedId}`)
+  ]);
+  const board = boards[0];
+  if (!board) return null;
+  return {
+    id: board.id,
+    name: board.name,
+    color: board.color || '#2b52ff',
+    columns: columns.map((column) => ({
+      id: column.id,
+      name: column.name,
+      showTimer: Boolean(column.show_timer)
+    })),
+    cards: cards.map((card) => ({
+      id: card.id,
+      columnId: card.column_id,
+      clientId: card.client_id || '',
+      title: card.title,
+      description: card.description || '',
+      dueDate: card.due_date || '',
+      createdBy: card.created_by || '',
+      assignedTo: card.assigned_to || '',
+      enteredColumnAt: new Date(card.entered_column_at).getTime()
+    }))
+  };
 }
 
 async function syncSupabaseAppUser(authUser, fallbackName = '') {
@@ -323,7 +383,38 @@ async function getSupabaseUserFromToken(accessToken) {
   return data;
 }
 
-async function requireApiUser(req, res, db) {
+const AUTH_CACHE_TTL_MS = 5 * 60 * 1000;
+const authCache = new Map();
+const syncedAppUsers = new Map();
+
+function cacheAuthUser(accessToken, authUser) {
+  const expMs = Number(decodeJwtPayload(accessToken)?.exp || 0) * 1000;
+  const expiresAt = Math.min(Date.now() + AUTH_CACHE_TTL_MS, expMs || Infinity);
+  if (authCache.size > 500) {
+    for (const [token, entry] of authCache) {
+      if (entry.expiresAt <= Date.now()) authCache.delete(token);
+    }
+  }
+  authCache.set(accessToken, { authUser, expiresAt });
+}
+
+async function getCachedSupabaseUser(accessToken) {
+  const cached = authCache.get(accessToken);
+  if (cached && cached.expiresAt > Date.now()) return cached.authUser;
+  authCache.delete(accessToken);
+  const authUser = await getSupabaseUserFromToken(accessToken);
+  if (authUser) cacheAuthUser(accessToken, authUser);
+  return authUser;
+}
+
+async function ensureSupabaseAppUser(authUser) {
+  const signature = `${authUser.email}|${authUser.user_metadata?.name || ''}`;
+  if (syncedAppUsers.get(authUser.id) === signature) return;
+  await syncSupabaseAppUser(authUser);
+  syncedAppUsers.set(authUser.id, signature);
+}
+
+async function requireApiUser(req, res) {
   if (!hasSupabaseAuth()) {
     sendError(res, 503, 'Supabase Auth no esta configurado');
     return null;
@@ -334,30 +425,13 @@ async function requireApiUser(req, res, db) {
     sendError(res, 401, 'Sesion requerida');
     return null;
   }
-  const authUser = await getSupabaseUserFromToken(match[1]);
+  const authUser = await getCachedSupabaseUser(match[1]);
   if (!authUser) {
     sendError(res, 401, 'Sesion invalida');
     return null;
   }
-  await syncSupabaseAppUser(authUser);
-  const user = syncLocalUser(db, authUser);
-  return user;
-}
-
-function syncLocalUser(db, authUser, fallbackName = '') {
-  const email = String(authUser.email || '').trim().toLowerCase();
-  const name = String(authUser.user_metadata?.name || fallbackName || email.split('@')[0] || 'Usuario').trim();
-  let user = db.users.find((candidate) => candidate.id === authUser.id || candidate.email.toLowerCase() === email);
-  if (user) {
-    user.id = authUser.id || user.id;
-    user.email = email || user.email;
-    user.name = name || user.name;
-    delete user.password;
-    return user;
-  }
-  user = { id: authUser.id, email, name };
-  db.users.push(user);
-  return user;
+  await ensureSupabaseAppUser(authUser);
+  return { id: authUser.id, email: authUser.email, name: authUser.user_metadata?.name || authUser.email };
 }
 
 function findBoard(db, boardId) {
@@ -411,8 +485,8 @@ async function enqueueStatusWrite(operation) {
 }
 
 async function handleApi(req, res, url) {
-  const db = await readDb();
-  ensureSettings(db);
+  const db = hasSupabaseAuth() ? null : await readDb();
+  if (db) ensureSettings(db);
   const body = req.method === 'GET' ? {} : await readBody(req);
   const segments = url.pathname.split('/').filter(Boolean);
 
@@ -422,11 +496,9 @@ async function handleApi(req, res, url) {
     if (hasSupabaseAuth()) {
       try {
         const auth = await signInWithSupabase(email, password);
-        const nextDb = await readDb();
-        ensureSettings(nextDb);
-        await syncSupabaseAppUser(auth.user);
-        const user = syncLocalUser(nextDb, auth.user);
-        await tryWriteDb(nextDb);
+        const user = await syncSupabaseAppUser(auth.user);
+        syncedAppUsers.set(auth.user.id, `${auth.user.email}|${auth.user.user_metadata?.name || ''}`);
+        cacheAuthUser(auth.access_token, auth.user);
         return sendJson(res, 200, { user: publicUser(user), accessToken: auth.access_token });
       } catch (error) {
         console.error('Supabase login failed:', error.message);
@@ -450,7 +522,7 @@ async function handleApi(req, res, url) {
     });
   }
 
-  const apiUser = await requireApiUser(req, res, db);
+  const apiUser = await requireApiUser(req, res);
   if (!apiUser) return;
 
   if (req.method === 'GET' && url.pathname === '/api/bootstrap') {
@@ -594,15 +666,14 @@ async function handleApi(req, res, url) {
     if (hasSupabaseAuth()) {
       try {
         const auth = await createSupabaseUser({ email, password, name });
-        await syncSupabaseAppUser(auth.user, name);
-        user = syncLocalUser(db, auth.user, name);
-        await tryRecordSupabaseAudit(body, `Creo el usuario "${email}"`);
+        user = await syncSupabaseAppUser(auth.user, name);
+        recordAuditInBackground(body, `Creo el usuario "${email}"`);
       } catch (error) {
         return sendError(res, 400, error.message);
       }
-    } else {
-      db.users.push(user);
+      return sendJson(res, 201, { user: publicUser(user), invited: true });
     }
+    db.users.push(user);
     await tryWriteDb(db);
     return sendJson(res, 201, { user: publicUser(user), invited: true });
   }
@@ -631,7 +702,7 @@ async function handleApi(req, res, url) {
           status_id: statusId
         }])
       });
-      await tryRecordSupabaseAudit(body, `Creo el cliente "${client.name}"`);
+      recordAuditInBackground(body, `Creo el cliente "${client.name}"`);
       return sendJson(res, 201, { client: { ...client, id: createdClient.id } });
     }
     db.clients.push(client);
@@ -641,9 +712,9 @@ async function handleApi(req, res, url) {
 
   if (segments[0] === 'api' && segments[1] === 'clients' && segments[2]) {
     const requestedClientId = segments[2];
-    const state = hasSupabaseAuth() ? await getSupabaseState() : null;
-    const clients = state?.clients || db.clients;
-    const client = clients.find((item) => item.id === requestedClientId);
+    const client = hasSupabaseAuth()
+      ? await getSupabaseClient(requestedClientId)
+      : db.clients.find((item) => item.id === requestedClientId);
     if (!client) return sendError(res, 404, 'Cliente no encontrado');
 
     if (req.method === 'PATCH' && segments.length === 3) {
@@ -668,7 +739,7 @@ async function handleApi(req, res, url) {
             status_id: statusId
           })
         });
-        await tryRecordSupabaseAudit(body, `Modifico el cliente "${client.name}"`);
+        recordAuditInBackground(body, `Modifico el cliente "${client.name}"`);
         return sendJson(res, 200, { client: { id: client.id, ...payload } });
       }
       client.name = body.name === undefined ? client.name : String(body.name).trim();
@@ -703,7 +774,7 @@ async function handleApi(req, res, url) {
         headers: { Prefer: 'return=representation' },
         body: JSON.stringify([{ id: board.columns[0].id, board_id: board.id, name: board.columns[0].name, show_timer: false, position: 1 }])
       });
-      await tryRecordSupabaseAudit(body, `Creo el tablero "${name}"`);
+      recordAuditInBackground(body, `Creo el tablero "${name}"`);
       return sendJson(res, 201, { board });
     }
     const board = {
@@ -721,7 +792,7 @@ async function handleApi(req, res, url) {
 
   if (segments[0] === 'api' && segments[1] === 'boards' && segments[2]) {
     const board = hasSupabaseAuth()
-      ? (await getSupabaseState()).boards.find((item) => item.id === segments[2])
+      ? await getSupabaseBoard(segments[2])
       : findBoard(db, segments[2]);
     if (!board) return sendError(res, 404, 'Tablero no encontrado');
 
@@ -734,7 +805,7 @@ async function handleApi(req, res, url) {
           headers: { Prefer: 'return=representation' },
           body: JSON.stringify({ name })
         });
-        await tryRecordSupabaseAudit(body, `Renombro el tablero "${board.name}" a "${name}"`);
+        recordAuditInBackground(body, `Renombro el tablero "${board.name}" a "${name}"`);
         return sendJson(res, 200, { board: { ...board, name } });
       }
       const previousName = board.name;
@@ -746,11 +817,11 @@ async function handleApi(req, res, url) {
 
     if (req.method === 'DELETE' && segments.length === 3) {
       if (hasSupabaseAuth()) {
-        const state = await getSupabaseState();
-        if (state.boards.length <= 1) return sendError(res, 400, 'Debe conservarse al menos un tablero');
+        const boards = await supabaseRest('/boards?select=id,name,color&order=position.asc');
+        if (boards.length <= 1) return sendError(res, 400, 'Debe conservarse al menos un tablero');
         await supabaseRest(`/boards?id=eq.${encodeURIComponent(board.id)}`, { method: 'DELETE' });
-        await tryRecordSupabaseAudit(body, `Elimino el tablero "${board.name}"`);
-        return sendJson(res, 200, { boards: state.boards.filter((item) => item.id !== board.id) });
+        recordAuditInBackground(body, `Elimino el tablero "${board.name}"`);
+        return sendJson(res, 200, { boards: boards.filter((item) => item.id !== board.id) });
       }
       if (db.boards.length <= 1) return sendError(res, 400, 'Debe conservarse al menos un tablero');
       const boardName = board.name;
@@ -777,7 +848,7 @@ async function handleApi(req, res, url) {
           }])
         });
         board.columns.push(column);
-        await tryRecordSupabaseAudit(body, `Creo la columna "${name}" en "${board.name}"`);
+        recordAuditInBackground(body, `Creo la columna "${name}" en "${board.name}"`);
         return sendJson(res, 201, { column, board });
       }
       board.columns.push(column);
@@ -800,7 +871,7 @@ async function handleApi(req, res, url) {
           body: JSON.stringify({ position: index + 1 })
         })));
         board.columns = columnIds.map((id) => board.columns.find((column) => column.id === id)).filter(Boolean);
-        await tryRecordSupabaseAudit(body, `Reordeno columnas en "${board.name}"`);
+        recordAuditInBackground(body, `Reordeno columnas en "${board.name}"`);
         return sendJson(res, 200, { board });
       }
       board.columns = columnIds.map((id) => board.columns.find((column) => column.id === id)).filter(Boolean);
@@ -817,7 +888,7 @@ async function handleApi(req, res, url) {
         const column = board.columns.find((item) => item.id === columnId);
         await supabaseRest(`/board_columns?id=eq.${encodeURIComponent(columnId)}`, { method: 'DELETE' });
         board.columns = board.columns.filter((column) => column.id !== columnId);
-        await tryRecordSupabaseAudit(body, `Elimino la columna "${column?.name || columnId}" de "${board.name}"`);
+        recordAuditInBackground(body, `Elimino la columna "${column?.name || columnId}" de "${board.name}"`);
         return sendJson(res, 200, { board });
       }
       const column = board.columns.find((item) => item.id === columnId);
@@ -860,7 +931,7 @@ async function handleApi(req, res, url) {
           }])
         });
         board.cards.push(card);
-        await tryRecordSupabaseAudit(body, `Creo la tarjeta "${title}" en "${board.name}"`);
+        recordAuditInBackground(body, `Creo la tarjeta "${title}" en "${board.name}"`);
         return sendJson(res, 201, { card, board });
       }
       board.cards.push(card);
@@ -902,9 +973,9 @@ async function handleApi(req, res, url) {
         if (previousColumnId !== card.columnId) {
           const fromColumn = board.columns.find((column) => column.id === previousColumnId);
           const toColumn = board.columns.find((column) => column.id === card.columnId);
-          await tryRecordSupabaseAudit(body, `Movio la tarjeta "${card.title}" de "${fromColumn?.name || previousColumnId}" a "${toColumn?.name || card.columnId}"`);
+          recordAuditInBackground(body, `Movio la tarjeta "${card.title}" de "${fromColumn?.name || previousColumnId}" a "${toColumn?.name || card.columnId}"`);
         } else {
-          await tryRecordSupabaseAudit(body, `Modifico la tarjeta "${previousTitle}" en "${board.name}"`);
+          recordAuditInBackground(body, `Modifico la tarjeta "${previousTitle}" en "${board.name}"`);
         }
         return sendJson(res, 200, { card, board });
       }
@@ -924,7 +995,7 @@ async function handleApi(req, res, url) {
       if (hasSupabaseAuth()) {
         await supabaseRest(`/cards?id=eq.${encodeURIComponent(segments[4])}`, { method: 'DELETE' });
         board.cards = board.cards.filter((card) => card.id !== segments[4]);
-        await tryRecordSupabaseAudit(body, `Elimino la tarjeta "${card?.title || segments[4]}" de "${board.name}"`);
+        recordAuditInBackground(body, `Elimino la tarjeta "${card?.title || segments[4]}" de "${board.name}"`);
         return sendJson(res, 200, { board });
       }
       board.cards = board.cards.filter((card) => card.id !== segments[4]);
