@@ -1,5 +1,5 @@
 import { api, clearSession } from './api.js';
-import { escapeHtml, getInitials } from './utils.js';
+import { escapeHtml, getInitials, setButtonLoading } from './utils.js';
 
 export function renderSidebar({ state, currentUser, activePage, onRefresh }) {
   const sidebar = document.querySelector('[data-sidebar]');
@@ -54,7 +54,7 @@ export function renderSidebar({ state, currentUser, activePage, onRefresh }) {
   sidebar.querySelectorAll('[data-delete-board]').forEach((button) => {
     button.addEventListener('click', async (event) => {
       event.stopPropagation();
-      await deleteBoard({ state, currentUser, boardId: button.dataset.deleteBoard, onRefresh });
+      await deleteBoard({ state, currentUser, boardId: button.dataset.deleteBoard, onRefresh, button });
     });
   });
 
@@ -71,7 +71,7 @@ export function renderSidebar({ state, currentUser, activePage, onRefresh }) {
   sidebar.querySelector('[data-open-invite]').addEventListener('click', () => openInviteModal({ onRefresh }));
 }
 
-async function deleteBoard({ state, currentUser, boardId, onRefresh }) {
+async function deleteBoard({ state, currentUser, boardId, onRefresh, button }) {
   if (state.boards.length <= 1) {
     alert('Debe conservarse al menos un tablero.');
     return;
@@ -81,15 +81,21 @@ async function deleteBoard({ state, currentUser, boardId, onRefresh }) {
   if (!board) return;
   if (!confirm(`Seguro que deseas eliminar el tablero "${board.name}"?`)) return;
 
-  await api(`/api/boards/${boardId}`, {
-    method: 'DELETE',
-    body: JSON.stringify(auditUser(currentUser))
-  });
-  if (state.activeBoardId === boardId) {
-    const nextBoard = state.boards.find((item) => item.id !== boardId);
-    if (nextBoard) localStorage.setItem('activeBoardId', nextBoard.id);
+  if (button) setButtonLoading(button, true, '...');
+  try {
+    await api(`/api/boards/${boardId}`, {
+      method: 'DELETE',
+      body: JSON.stringify(auditUser(currentUser))
+    });
+    if (state.activeBoardId === boardId) {
+      const nextBoard = state.boards.find((item) => item.id !== boardId);
+      if (nextBoard) localStorage.setItem('activeBoardId', nextBoard.id);
+    }
+    await onRefresh();
+  } catch (error) {
+    if (button) setButtonLoading(button, false);
+    alert(error.message);
   }
-  await onRefresh();
 }
 
 function openUserSummaryModal({ state, userId }) {
@@ -207,13 +213,21 @@ function openBoardModal({ state, currentUser, onRefresh }) {
     if (submitting) return;
     const name = overlay.querySelector('#board-name-input').value.trim();
     if (!name) return;
+    const submitButton = overlay.querySelector('button[type="submit"]');
     submitting = true;
-    const { board } = await api('/api/boards', { method: 'POST', body: JSON.stringify({ name, ...auditUser(currentUser) }) });
-    state.activeBoardId = board.id;
-    localStorage.setItem('activeBoardId', board.id);
-    closeModal();
-    await onRefresh();
-    window.location.href = '/kanban';
+    setButtonLoading(submitButton, true, 'Creando...');
+    try {
+      const { board } = await api('/api/boards', { method: 'POST', body: JSON.stringify({ name, ...auditUser(currentUser) }) });
+      state.activeBoardId = board.id;
+      localStorage.setItem('activeBoardId', board.id);
+      closeModal();
+      await onRefresh();
+      window.location.href = '/kanban';
+    } catch (error) {
+      submitting = false;
+      setButtonLoading(submitButton, false);
+      alert(error.message);
+    }
   });
 }
 
@@ -255,9 +269,17 @@ function openInviteModal({ onRefresh }) {
     const email = overlay.querySelector('#invite-email-input').value.trim();
     const password = overlay.querySelector('#invite-password-input').value;
     if (!name || !email || !password) return;
+    const submitButton = overlay.querySelector('button[type="submit"]');
     submitting = true;
-    await api('/api/users/invitations', { method: 'POST', body: JSON.stringify({ name, email, password }) });
-    closeModal();
-    await onRefresh();
+    setButtonLoading(submitButton, true, 'Creando...');
+    try {
+      await api('/api/users/invitations', { method: 'POST', body: JSON.stringify({ name, email, password }) });
+      closeModal();
+      await onRefresh();
+    } catch (error) {
+      submitting = false;
+      setButtonLoading(submitButton, false);
+      alert(error.message);
+    }
   });
 }

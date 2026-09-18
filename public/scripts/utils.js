@@ -40,3 +40,16 @@ export function getTimeInColumn(enteredTimestamp) {
   if (diffHours < 24) return `${diffHours}h en col.`;
   return `${diffDays}d en col.`;
 }
+
+export function setButtonLoading(button, loading, originalText = null) {
+  if (loading) {
+    button.dataset.originalText = button.textContent;
+    button.disabled = true;
+    button.classList.add('btn-loading');
+    button.innerHTML = `<span class="btn-spinner"></span> ${escapeHtml(originalText || 'Cargando...')}`;
+  } else {
+    button.disabled = false;
+    button.classList.remove('btn-loading');
+    button.textContent = button.dataset.originalText || originalText || '';
+  }
+}

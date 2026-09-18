@@ -218,6 +218,36 @@ aside {
   opacity: 0.55;
 }
 
+.btn.btn-loading {
+  pointer-events: none;
+  opacity: 0.7;
+  position: relative;
+}
+
+.btn.btn-loading .btn-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: btn-spin 0.6s linear infinite;
+}
+
+.btn-secondary.btn-loading .btn-spinner {
+  border-color: rgba(255, 255, 255, 0.15);
+  border-top-color: var(--text-main);
+}
+
+.btn-danger.btn-loading .btn-spinner {
+  border-color: rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
+}
+
+@keyframes btn-spin {
+  to { transform: rotate(360deg); }
+}
+
 .btn-secondary {
   background-color: transparent;
   border: 1px solid var(--border-color);

@@ -1,7 +1,7 @@
 import { api, requireSession } from './api.js';
 import { loadAppState } from './app-state.js';
 import { closeModal, openModal, renderSidebar } from './layout.js';
-import { escapeHtml, getDueDateStatus } from './utils.js';
+import { escapeHtml, getDueDateStatus, setButtonLoading } from './utils.js';
 
 const currentUser = requireSession();
 let state;
@@ -133,13 +133,21 @@ function openClientModal(client = null) {
       alert('No se pudo identificar el cliente. Actualiza la pagina e intenta de nuevo.');
       return;
     }
+    const submitButton = overlay.querySelector('button[type="submit"]');
     submitting = true;
-    await api(isEdit ? `/api/clients/${client.id}` : '/api/clients', {
-      method: isEdit ? 'PATCH' : 'POST',
-      body: JSON.stringify({ ...payload, ...auditUser() })
-    });
-    closeModal();
-    await refresh();
+    setButtonLoading(submitButton, true, 'Guardando...');
+    try {
+      await api(isEdit ? `/api/clients/${client.id}` : '/api/clients', {
+        method: isEdit ? 'PATCH' : 'POST',
+        body: JSON.stringify({ ...payload, ...auditUser() })
+      });
+      closeModal();
+      await refresh();
+    } catch (error) {
+      submitting = false;
+      setButtonLoading(submitButton, false);
+      alert(error.message);
+    }
   });
 }
 
