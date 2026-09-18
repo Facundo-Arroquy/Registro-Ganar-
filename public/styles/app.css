@@ -218,6 +218,36 @@ aside {
   opacity: 0.55;
 }
 
+.btn.btn-loading {
+  pointer-events: none;
+  opacity: 0.7;
+  position: relative;
+}
+
+.btn.btn-loading .btn-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: btn-spin 0.6s linear infinite;
+}
+
+.btn-secondary.btn-loading .btn-spinner {
+  border-color: rgba(255, 255, 255, 0.15);
+  border-top-color: var(--text-main);
+}
+
+.btn-danger.btn-loading .btn-spinner {
+  border-color: rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
+}
+
+@keyframes btn-spin {
+  to { transform: rotate(360deg); }
+}
+
 .btn-secondary {
   background-color: transparent;
   border: 1px solid var(--border-color);
@@ -254,6 +284,92 @@ aside {
 .btn-sm {
   padding: 4px 8px;
   font-size: 0.75rem;
+}
+
+.client-link {
+  color: var(--accent-blue);
+  text-decoration: none;
+  font-size: 0.8rem;
+  font-weight: 500;
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background-color: rgba(56, 139, 253, 0.1);
+  transition: background-color 0.15s;
+}
+
+.client-link:hover {
+  background-color: rgba(56, 139, 253, 0.2);
+  text-decoration: underline;
+}
+
+.link-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.link-row:last-child {
+  border-bottom: none;
+}
+
+.link-add-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  align-items: center;
+}
+
+.sortable-th {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.sortable-th:hover {
+  color: var(--accent-blue);
+}
+
+.sortable-th.sort-active {
+  color: var(--accent-blue);
+}
+
+.sort-icon {
+  font-size: 0.7rem;
+}
+
+.general-links-section {
+  margin-top: 32px;
+}
+
+.general-links-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.general-link-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background-color: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+
+.general-link-anchor {
+  color: var(--accent-blue);
+  text-decoration: none;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.general-link-anchor:hover {
+  text-decoration: underline;
 }
 
 main {

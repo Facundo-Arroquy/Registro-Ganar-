@@ -148,14 +148,16 @@ async function supabaseRest(pathname, options = {}) {
 }
 
 async function getSupabaseState() {
-  const [users, statuses, auditRows, clients, boards, columns, cards] = await Promise.all([
+  const [users, statuses, auditRows, clients, boards, columns, cards, clientLinks, generalLinks] = await Promise.all([
     supabaseRest('/app_users?select=id,email,name&order=name.asc'),
     getSupabaseStatuses(),
     supabaseRest('/settings_audit?select=action,user_id,user_name,created_at&order=created_at.desc&limit=50'),
     supabaseRest('/clients?select=id,name,company,email,owner_id,status_id'),
     supabaseRest('/boards?select=id,name,color,position&order=position.asc'),
     supabaseRest('/board_columns?select=id,board_id,name,show_timer,position&order=position.asc'),
-    supabaseRest('/cards?select=id,board_id,column_id,client_id,title,description,due_date,created_by,assigned_to,entered_column_at')
+    supabaseRest('/cards?select=id,board_id,column_id,client_id,title,description,due_date,created_by,assigned_to,entered_column_at'),
+    supabaseRest('/client_links?select=id,client_id,url,label'),
+    supabaseRest('/general_links?select=id,url,label&order=created_at.asc')
   ]);
   const statusById = new Map(statuses.map((status) => [status.id, status]));
   return {
@@ -171,7 +173,8 @@ async function getSupabaseState() {
       company: client.company,
       email: client.email || '',
       ownerId: client.owner_id || '',
-      status: statusById.get(client.status_id)?.name || 'Activo'
+      status: statusById.get(client.status_id)?.name || 'Activo',
+      links: clientLinks.filter((link) => link.client_id === client.id).map((link) => ({ id: link.id, url: link.url, label: link.label }))
     })),
     boards: boards.map((board) => ({
       id: board.id,
@@ -197,7 +200,8 @@ async function getSupabaseState() {
           assignedTo: card.assigned_to || '',
           enteredColumnAt: new Date(card.entered_column_at).getTime()
         }))
-    }))
+    })),
+    generalLinks: generalLinks.map((link) => ({ id: link.id, url: link.url, label: link.label }))
   };
 }
 
@@ -532,9 +536,10 @@ async function handleApi(req, res, url) {
     await tryWriteDb(db);
     return sendJson(res, 200, {
       users: db.users.map(publicUser),
-      clients: db.clients,
+      clients: (db.clients || []).map((client) => ({ ...client, links: client.links || [] })),
       boards: db.boards,
-      settings: db.settings
+      settings: db.settings,
+      generalLinks: db.generalLinks || []
     });
   }
 
@@ -751,6 +756,66 @@ async function handleApi(req, res, url) {
       await writeDb(db);
       return sendJson(res, 200, { client });
     }
+
+    if (req.method === 'POST' && segments[3] === 'links' && segments.length === 4) {
+      const linkUrl = String(body.url || '').trim();
+      const label = String(body.label || '').trim();
+      if (!linkUrl || !label) return sendError(res, 400, 'URL y descripcion son obligatorios');
+      const link = { id: makeId('lnk'), url: linkUrl, label };
+      if (hasSupabaseAuth()) {
+        await supabaseRest('/client_links', {
+          method: 'POST',
+          headers: { Prefer: 'return=representation' },
+          body: JSON.stringify([{ id: link.id, client_id: client.id, url: link.url, label: link.label }])
+        });
+        return sendJson(res, 201, { link });
+      }
+      if (!client.links) client.links = [];
+      client.links.push(link);
+      await writeDb(db);
+      return sendJson(res, 201, { link });
+    }
+
+    if (req.method === 'DELETE' && segments[3] === 'links' && segments[4]) {
+      const linkId = segments[4];
+      if (hasSupabaseAuth()) {
+        await supabaseRest(`/client_links?id=eq.${encodeURIComponent(linkId)}&client_id=eq.${encodeURIComponent(client.id)}`, { method: 'DELETE' });
+        return sendJson(res, 200, { deleted: true });
+      }
+      client.links = (client.links || []).filter((link) => link.id !== linkId);
+      await writeDb(db);
+      return sendJson(res, 200, { deleted: true });
+    }
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/general-links') {
+    const linkUrl = String(body.url || '').trim();
+    const label = String(body.label || '').trim();
+    if (!linkUrl || !label) return sendError(res, 400, 'URL y descripcion son obligatorios');
+    const link = { id: makeId('gl'), url: linkUrl, label };
+    if (hasSupabaseAuth()) {
+      await supabaseRest('/general_links', {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify([{ id: link.id, url: link.url, label: link.label }])
+      });
+      return sendJson(res, 201, { link });
+    }
+    if (!db.generalLinks) db.generalLinks = [];
+    db.generalLinks.push(link);
+    await writeDb(db);
+    return sendJson(res, 201, { link });
+  }
+
+  if (req.method === 'DELETE' && segments[0] === 'api' && segments[1] === 'general-links' && segments[2]) {
+    const linkId = segments[2];
+    if (hasSupabaseAuth()) {
+      await supabaseRest(`/general_links?id=eq.${encodeURIComponent(linkId)}`, { method: 'DELETE' });
+      return sendJson(res, 200, { deleted: true });
+    }
+    db.generalLinks = (db.generalLinks || []).filter((link) => link.id !== linkId);
+    await writeDb(db);
+    return sendJson(res, 200, { deleted: true });
   }
 
   if (req.method === 'POST' && url.pathname === '/api/boards') {

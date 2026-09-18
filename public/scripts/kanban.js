@@ -1,7 +1,7 @@
 import { api, requireSession } from './api.js';
 import { getActiveBoard, loadAppState, setActiveBoard } from './app-state.js';
 import { closeModal, openModal, renderSidebar } from './layout.js';
-import { escapeHtml, getDueDateStatus, getInitials, getTimeInColumn } from './utils.js';
+import { escapeHtml, getDueDateStatus, getInitials, getTimeInColumn, setButtonLoading } from './utils.js';
 
 const currentUser = requireSession();
 let state;
@@ -93,7 +93,7 @@ function bindKanbanEvents() {
     button.addEventListener('click', () => openCardModal(button.dataset.addCard));
   });
   document.querySelectorAll('[data-delete-column]').forEach((button) => {
-    button.addEventListener('click', () => deleteColumn(button.dataset.deleteColumn));
+    button.addEventListener('click', () => deleteColumn(button.dataset.deleteColumn, button));
   });
   document.querySelectorAll('[data-card-id]').forEach((card) => {
     card.addEventListener('click', () => openCardDetail(card.dataset.cardId));
@@ -182,13 +182,21 @@ async function openColumnModal() {
     const board = getActiveBoard(state);
     const name = overlay.querySelector('#column-name-input').value.trim();
     if (!name || !board) return;
+    const submitButton = overlay.querySelector('button[type="submit"]');
     submitting = true;
-    await api(`/api/boards/${board.id}/columns`, {
-      method: 'POST',
-      body: JSON.stringify({ name, showTimer: overlay.querySelector('#column-timer-toggle').checked, ...auditUser() })
-    });
-    closeModal();
-    await refresh();
+    setButtonLoading(submitButton, true, 'Creando...');
+    try {
+      await api(`/api/boards/${board.id}/columns`, {
+        method: 'POST',
+        body: JSON.stringify({ name, showTimer: overlay.querySelector('#column-timer-toggle').checked, ...auditUser() })
+      });
+      closeModal();
+      await refresh();
+    } catch (error) {
+      submitting = false;
+      setButtonLoading(submitButton, false);
+      alert(error.message);
+    }
   });
 }
 
@@ -217,11 +225,26 @@ function openCardModal(columnId, card = null) {
   overlay.querySelector('form').addEventListener('submit', async (event) => {
     event.preventDefault();
     if (submitting) return;
+    const submitButton = overlay.querySelector('button[type="submit"]');
     submitting = true;
-    await saveCard(columnId, card);
+    setButtonLoading(submitButton, true, 'Guardando...');
+    try {
+      await saveCard(columnId, card);
+    } catch (error) {
+      submitting = false;
+      setButtonLoading(submitButton, false);
+      alert(error.message);
+    }
   });
-  overlay.querySelector('[data-delete-card]')?.addEventListener('click', async () => {
-    await deleteCard(card.id);
+  overlay.querySelector('[data-delete-card]')?.addEventListener('click', async function () {
+    if (this.classList.contains('btn-loading')) return;
+    setButtonLoading(this, true, 'Eliminando...');
+    try {
+      await deleteCard(card.id);
+    } catch (error) {
+      setButtonLoading(this, false);
+      alert(error.message);
+    }
   });
 }
 
@@ -296,14 +319,20 @@ async function moveColumn(originId, targetId) {
   }
 }
 
-async function deleteColumn(columnId) {
+async function deleteColumn(columnId, button) {
   const board = getActiveBoard(state);
   const cardsInColumn = board.cards.filter((card) => card.columnId === columnId);
   if (board.columns.length <= 1) return alert('El tablero debe conservar al menos una columna.');
   if (cardsInColumn.length > 0) return alert('No puedes eliminar una columna que contiene tarjetas.');
   if (!confirm('Seguro que deseas eliminar esta columna?')) return;
-  await api(`/api/boards/${board.id}/columns/${columnId}`, { method: 'DELETE', body: JSON.stringify(auditUser()) });
-  await refresh();
+  setButtonLoading(button, true, 'Eliminando...');
+  try {
+    await api(`/api/boards/${board.id}/columns/${columnId}`, { method: 'DELETE', body: JSON.stringify(auditUser()) });
+    await refresh();
+  } catch (error) {
+    setButtonLoading(button, false);
+    alert(error.message);
+  }
 }
 
 function openBoardSettings() {
@@ -332,21 +361,36 @@ function openBoardSettings() {
     if (submitting) return;
     const name = overlay.querySelector('#setting-board-name').value.trim();
     if (!name) return;
+    const submitButton = overlay.querySelector('button[type="submit"]');
     submitting = true;
-    await api(`/api/boards/${board.id}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ name, ...auditUser() })
-    });
-    closeModal();
-    await refresh();
+    setButtonLoading(submitButton, true, 'Guardando...');
+    try {
+      await api(`/api/boards/${board.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ name, ...auditUser() })
+      });
+      closeModal();
+      await refresh();
+    } catch (error) {
+      submitting = false;
+      setButtonLoading(submitButton, false);
+      alert(error.message);
+    }
   });
-  overlay.querySelector('[data-delete-board]').addEventListener('click', async () => {
+  overlay.querySelector('[data-delete-board]').addEventListener('click', async function () {
     if (state.boards.length <= 1) return alert('Debes conservar al menos un tablero.');
-    await api(`/api/boards/${board.id}`, { method: 'DELETE', body: JSON.stringify(auditUser()) });
-    closeModal();
-    state = await loadAppState();
-    localStorage.setItem('activeBoardId', state.activeBoardId);
-    renderPage();
+    if (this.classList.contains('btn-loading')) return;
+    setButtonLoading(this, true, 'Eliminando...');
+    try {
+      await api(`/api/boards/${board.id}`, { method: 'DELETE', body: JSON.stringify(auditUser()) });
+      closeModal();
+      state = await loadAppState();
+      localStorage.setItem('activeBoardId', state.activeBoardId);
+      renderPage();
+    } catch (error) {
+      setButtonLoading(this, false);
+      alert(error.message);
+    }
   });
 }
 

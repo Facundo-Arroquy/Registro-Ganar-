@@ -1,4 +1,5 @@
 import { api, setSessionUser } from './api.js';
+import { setButtonLoading } from './utils.js';
 
 const form = document.querySelector('#login-form');
 const error = document.querySelector('#login-error');
@@ -12,12 +13,17 @@ passwordToggle.addEventListener('click', () => {
   passwordToggle.setAttribute('aria-label', isVisible ? 'Mostrar contrasena' : 'Ocultar contrasena');
 });
 
+let submitting = false;
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
+  if (submitting) return;
   error.textContent = '';
   const email = document.querySelector('#login-email').value.trim();
   const password = document.querySelector('#login-password').value;
+  const submitButton = form.querySelector('button[type="submit"]');
 
+  submitting = true;
+  setButtonLoading(submitButton, true, 'Ingresando...');
   try {
     const { user, accessToken } = await api('/api/login', {
       method: 'POST',
@@ -27,5 +33,7 @@ form.addEventListener('submit', async (event) => {
     window.location.href = '/dashboard';
   } catch (err) {
     error.textContent = err.message;
+    submitting = false;
+    setButtonLoading(submitButton, false);
   }
 });

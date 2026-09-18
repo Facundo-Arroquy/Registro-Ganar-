@@ -1,7 +1,7 @@
 import { api, requireSession } from './api.js';
 import { loadAppState } from './app-state.js';
 import { closeModal, openModal, renderSidebar } from './layout.js';
-import { escapeHtml } from './utils.js';
+import { escapeHtml, setButtonLoading } from './utils.js';
 
 const currentUser = requireSession();
 let state;
@@ -49,7 +49,7 @@ function renderStatuses() {
     button.addEventListener('click', () => openStatusModal(Number(button.dataset.editStatus)));
   });
   document.querySelectorAll('[data-delete-status]').forEach((button) => {
-    button.addEventListener('click', () => deleteStatus(Number(button.dataset.deleteStatus)));
+    button.addEventListener('click', () => deleteStatus(Number(button.dataset.deleteStatus), button));
   });
 }
 
@@ -137,10 +137,7 @@ function openStatusModal(index = null) {
     const form = event.currentTarget;
     const submitButton = form.querySelector('button[type="submit"]');
     isSubmitting = true;
-    form.querySelectorAll('input, button').forEach((control) => {
-      control.disabled = true;
-    });
-    submitButton.textContent = 'Guardando...';
+    setButtonLoading(submitButton, true, 'Guardando...');
 
     try {
       await api(isEdit ? `/api/settings/client-statuses/${index}` : '/api/settings/client-statuses', {
@@ -151,20 +148,18 @@ function openStatusModal(index = null) {
       await refresh();
     } catch (error) {
       isSubmitting = false;
-      form.querySelectorAll('input, button').forEach((control) => {
-        control.disabled = false;
-      });
-      submitButton.textContent = isEdit ? 'Guardar Cambios' : 'Agregar';
+      setButtonLoading(submitButton, false);
       alert(error.message);
     }
   });
 }
 
-async function deleteStatus(index) {
+async function deleteStatus(index, button) {
   if (isDeletingStatus) return;
   const status = getStatusName(getClientStatuses()[index]);
   if (!status || !confirm(`Seguro que queres sacar el estado "${status}"?`)) return;
   isDeletingStatus = true;
+  setButtonLoading(button, true, 'Sacando...');
   try {
     await api(`/api/settings/client-statuses/${index}`, {
       method: 'DELETE',
@@ -172,6 +167,7 @@ async function deleteStatus(index) {
     });
     await refresh();
   } catch (error) {
+    setButtonLoading(button, false);
     alert(error.message);
   } finally {
     isDeletingStatus = false;
