@@ -36,19 +36,27 @@
         <table class="table">
           <thead>
             <tr>
-              <th>Nombre</th>
-              <th>Empresa</th>
-              <th>Correo</th>
-              <th>Personal a cargo</th>
-              <th>Estado</th>
-              <th>Tarjetas Asignadas</th>
-              <th>Con Timer</th>
-              <th>Promedio en Timer</th>
+              <th class="sortable-th" data-sort="name">Nombre <span class="sort-icon"></span></th>
+              <th class="sortable-th" data-sort="company">Empresa <span class="sort-icon"></span></th>
+              <th class="sortable-th" data-sort="email">Correo <span class="sort-icon"></span></th>
+              <th class="sortable-th" data-sort="links">Links <span class="sort-icon"></span></th>
+              <th class="sortable-th" data-sort="owner">Personal a cargo <span class="sort-icon"></span></th>
+              <th class="sortable-th" data-sort="status">Estado <span class="sort-icon"></span></th>
+              <th class="sortable-th" data-sort="cards">Tarjetas Asignadas <span class="sort-icon"></span></th>
+              <th class="sortable-th" data-sort="timedCards">Con Timer <span class="sort-icon"></span></th>
+              <th class="sortable-th" data-sort="avgTime">Promedio en Timer <span class="sort-icon"></span></th>
               <th></th>
             </tr>
           </thead>
           <tbody id="clients-table-body"></tbody>
         </table>
+      </section>
+      <section class="general-links-section">
+        <div class="section-header">
+          <h2 style="font-size: 1.1rem; font-weight: 600;">Links Generales</h2>
+          <button class="btn" type="button" data-add-general-link>Agregar Link</button>
+        </div>
+        <div id="general-links-list" class="general-links-grid"></div>
       </section>
     </div>
   </main>

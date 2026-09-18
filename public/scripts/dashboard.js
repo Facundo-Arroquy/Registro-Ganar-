@@ -5,6 +5,8 @@ import { escapeHtml, getDueDateStatus, setButtonLoading } from './utils.js';
 
 const currentUser = requireSession();
 let state;
+let sortColumn = null;
+let sortDirection = 'asc';
 
 async function boot() {
   state = await loadAppState();
@@ -24,7 +26,9 @@ function renderPage() {
     onRefresh: refresh
   });
   document.querySelector('[data-open-client]').onclick = () => openClientModal();
+  document.querySelector('[data-add-general-link]').onclick = () => openGeneralLinkModal();
   renderDashboard();
+  renderGeneralLinks();
 }
 
 function renderDashboard() {
@@ -32,27 +36,70 @@ function renderDashboard() {
   const cards = state.boards.flatMap((board) => board.cards);
   document.querySelector('#stat-active-cards').textContent = cards.length;
   document.querySelector('#stat-expired-cards').textContent = cards.filter((card) => getDueDateStatus(card.dueDate)?.status === 'expired').length;
-  document.querySelector('#clients-table-body').innerHTML = state.clients.map((client) => {
-    const clientCards = getClientCards(client.id);
-    const timedCards = getTimedClientCards(client.id);
-    const averageMs = getAverageTimedMs(timedCards);
-    const owner = state.users.find((user) => user.id === client.ownerId);
-    return `
-      <tr class="editable-row" data-edit-client="${escapeHtml(client.id)}">
-        <td><strong>${escapeHtml(client.name)}</strong></td>
-        <td>${escapeHtml(client.company)}</td>
-        <td>${escapeHtml(client.email || 'N/A')}</td>
-        <td>${owner ? escapeHtml(owner.name) : '<span style="color: var(--text-muted);">Sin asignar</span>'}</td>
-        <td>${statusBadge(client.status || 'Activo')}</td>
-        <td><span class="card-count">${clientCards.length} tareas</span></td>
-        <td><span class="card-count">${timedCards.length} tags</span></td>
-        <td>${averageMs ? `<span class="time-badge">${escapeHtml(formatDuration(averageMs))}</span>` : '<span style="color: var(--text-muted);">Sin datos</span>'}</td>
-        <td><button class="btn btn-secondary btn-sm" type="button" data-edit-client-button="${escapeHtml(client.id)}">Editar</button></td>
-      </tr>
-    `;
-  }).join('');
+
+  const enriched = state.clients.map((client) => ({
+    client,
+    cards: getClientCards(client.id),
+    timedCards: getTimedClientCards(client.id),
+    averageMs: getAverageTimedMs(getTimedClientCards(client.id)),
+    owner: state.users.find((user) => user.id === client.ownerId),
+    links: client.links || []
+  }));
+
+  if (sortColumn) {
+    enriched.sort((a, b) => {
+      const val = getSortValue(a, sortColumn) ?? '';
+      const valB = getSortValue(b, sortColumn) ?? '';
+      let result;
+      if (typeof val === 'number' && typeof valB === 'number') {
+        result = val - valB;
+      } else {
+        result = String(val).localeCompare(String(valB), 'es', { sensitivity: 'base' });
+      }
+      return sortDirection === 'desc' ? -result : result;
+    });
+  }
+
+  document.querySelector('#clients-table-body').innerHTML = enriched.map(({ client, cards: clientCards, timedCards, averageMs, owner, links }) => `
+    <tr class="editable-row" data-edit-client="${escapeHtml(client.id)}">
+      <td><strong>${escapeHtml(client.name)}</strong></td>
+      <td>${escapeHtml(client.company)}</td>
+      <td>${renderEmails(client.email)}</td>
+      <td>${links.length ? links.map((link) => `<a href="${escapeHtml(link.url)}" target="_blank" rel="noopener" class="client-link" data-stop-row-click>${escapeHtml(link.label)}</a>`).join(' ') : '<span style="color: var(--text-muted);">-</span>'}</td>
+      <td>${owner ? escapeHtml(owner.name) : '<span style="color: var(--text-muted);">Sin asignar</span>'}</td>
+      <td>${statusBadge(client.status || 'Activo')}</td>
+      <td><span class="card-count">${clientCards.length} tareas</span></td>
+      <td><span class="card-count">${timedCards.length} tags</span></td>
+      <td>${averageMs ? `<span class="time-badge">${escapeHtml(formatDuration(averageMs))}</span>` : '<span style="color: var(--text-muted);">Sin datos</span>'}</td>
+      <td><button class="btn btn-secondary btn-sm" type="button" data-edit-client-button="${escapeHtml(client.id)}">Editar</button></td>
+    </tr>
+  `).join('');
+
+  document.querySelectorAll('.sortable-th').forEach((th) => {
+    const icon = th.querySelector('.sort-icon');
+    if (th.dataset.sort === sortColumn) {
+      icon.textContent = sortDirection === 'asc' ? ' ▲' : ' ▼';
+      th.classList.add('sort-active');
+    } else {
+      icon.textContent = '';
+      th.classList.remove('sort-active');
+    }
+    th.onclick = () => {
+      if (sortColumn === th.dataset.sort) {
+        sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+      } else {
+        sortColumn = th.dataset.sort;
+        sortDirection = 'asc';
+      }
+      renderDashboard();
+    };
+  });
+
   document.querySelectorAll('[data-edit-client]').forEach((row) => {
-    row.addEventListener('click', () => openClientModal(getClientById(row.dataset.editClient)));
+    row.addEventListener('click', (event) => {
+      if (event.target.closest('[data-stop-row-click]')) return;
+      openClientModal(getClientById(row.dataset.editClient));
+    });
   });
   document.querySelectorAll('[data-edit-client-button]').forEach((button) => {
     button.addEventListener('click', (event) => {
@@ -60,6 +107,21 @@ function renderDashboard() {
       openClientModal(getClientById(button.dataset.editClientButton));
     });
   });
+}
+
+function getSortValue(row, column) {
+  switch (column) {
+    case 'name': return row.client.name.toLowerCase();
+    case 'company': return row.client.company.toLowerCase();
+    case 'email': return (row.client.email || '').toLowerCase();
+    case 'links': return row.links.length;
+    case 'owner': return (row.owner?.name || '').toLowerCase();
+    case 'status': return (row.client.status || 'Activo').toLowerCase();
+    case 'cards': return row.cards.length;
+    case 'timedCards': return row.timedCards.length;
+    case 'avgTime': return row.averageMs;
+    default: return '';
+  }
 }
 
 function getClientById(clientId) {
@@ -96,13 +158,14 @@ function formatDuration(durationMs) {
 
 function openClientModal(client = null) {
   const isEdit = Boolean(client);
+  const existingLinks = isEdit ? (client.links || []) : [];
   const overlay = openModal(`
     <div class="modal-overlay">
       <form class="modal">
         <div class="modal-header">${isEdit ? 'Editar Cliente' : 'Nuevo Cliente'}</div>
         <div class="form-group"><label>Nombre del Contacto</label><input type="text" id="client-name-input" class="form-control" placeholder="Ej. Laura Martinez" value="${escapeHtml(client?.name || '')}"></div>
         <div class="form-group"><label>Empresa</label><input type="text" id="client-company-input" class="form-control" placeholder="Ej. TechCorp" value="${escapeHtml(client?.company || '')}"></div>
-        <div class="form-group"><label>Correo Electronico</label><input type="email" id="client-email-input" class="form-control" placeholder="cliente@techcorp.com" value="${escapeHtml(client?.email || '')}"></div>
+        <div class="form-group"><label>Correos Electronicos <span style="color: var(--text-muted); font-weight: 400;">(uno por linea)</span></label><textarea id="client-email-input" class="form-control" rows="2" placeholder="cliente@techcorp.com&#10;otro@empresa.com">${escapeHtml(client?.email || '')}</textarea></div>
         <div class="form-group"><label>Personal a cargo</label><select id="client-owner-input" class="form-control">${userOptions(client?.ownerId || '')}</select></div>
         <div class="form-group">
           <label>Estado del cliente</label>
@@ -110,6 +173,24 @@ function openClientModal(client = null) {
             ${statusOptions(client?.status || 'Activo')}
           </select>
         </div>
+        ${isEdit ? `
+        <div class="form-group">
+          <label>Links</label>
+          <div id="client-links-list">
+            ${existingLinks.map((link) => `
+              <div class="link-row" data-link-id="${escapeHtml(link.id)}">
+                <a href="${escapeHtml(link.url)}" target="_blank" rel="noopener" class="client-link">${escapeHtml(link.label)}</a>
+                <button class="btn btn-danger btn-sm" type="button" data-remove-link="${escapeHtml(link.id)}">Sacar</button>
+              </div>
+            `).join('')}
+          </div>
+          <div class="link-add-row">
+            <input type="text" id="link-label-input" class="form-control" placeholder="Descripcion" style="flex: 1;">
+            <input type="url" id="link-url-input" class="form-control" placeholder="https://..." style="flex: 1;">
+            <button class="btn btn-secondary btn-sm" type="button" data-add-link>Agregar</button>
+          </div>
+        </div>
+        ` : ''}
         <div class="modal-actions">
           <button class="btn btn-secondary" type="button" data-close-modal>Cancelar</button>
           <button class="btn" type="submit">${isEdit ? 'Guardar Cambios' : 'Guardar Cliente'}</button>
@@ -117,6 +198,48 @@ function openClientModal(client = null) {
       </form>
     </div>
   `);
+
+  if (isEdit) {
+    overlay.querySelector('[data-add-link]').addEventListener('click', async function () {
+      const labelInput = overlay.querySelector('#link-label-input');
+      const urlInput = overlay.querySelector('#link-url-input');
+      const label = labelInput.value.trim();
+      const url = urlInput.value.trim();
+      if (!label || !url) return;
+      setButtonLoading(this, true, 'Agregando...');
+      try {
+        const { link } = await api(`/api/clients/${client.id}/links`, {
+          method: 'POST',
+          body: JSON.stringify({ label, url })
+        });
+        const list = overlay.querySelector('#client-links-list');
+        const row = document.createElement('div');
+        row.className = 'link-row';
+        row.dataset.linkId = link.id;
+        row.innerHTML = `
+          <a href="${escapeHtml(link.url)}" target="_blank" rel="noopener" class="client-link">${escapeHtml(link.label)}</a>
+          <button class="btn btn-danger btn-sm" type="button" data-remove-link="${escapeHtml(link.id)}">Sacar</button>
+        `;
+        row.querySelector('[data-remove-link]').addEventListener('click', function () {
+          removeLinkHandler(this, client.id);
+        });
+        list.appendChild(row);
+        labelInput.value = '';
+        urlInput.value = '';
+      } catch (error) {
+        alert(error.message);
+      } finally {
+        setButtonLoading(this, false);
+      }
+    });
+
+    overlay.querySelectorAll('[data-remove-link]').forEach((button) => {
+      button.addEventListener('click', function () {
+        removeLinkHandler(this, client.id);
+      });
+    });
+  }
+
   let submitting = false;
   overlay.querySelector('form').addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -149,6 +272,19 @@ function openClientModal(client = null) {
       alert(error.message);
     }
   });
+}
+
+async function removeLinkHandler(button, clientId) {
+  const linkId = button.dataset.removeLink;
+  if (button.classList.contains('btn-loading')) return;
+  setButtonLoading(button, true, '...');
+  try {
+    await api(`/api/clients/${clientId}/links/${linkId}`, { method: 'DELETE' });
+    button.closest('.link-row').remove();
+  } catch (error) {
+    setButtonLoading(button, false);
+    alert(error.message);
+  }
 }
 
 function userOptions(selectedId = '') {
@@ -192,6 +328,82 @@ function statusBadge(status) {
 
 function isHexColor(color) {
   return /^#[0-9a-fA-F]{6}$/.test(String(color || ''));
+}
+
+function renderGeneralLinks() {
+  const links = state.generalLinks || [];
+  const container = document.querySelector('#general-links-list');
+  container.innerHTML = links.length ? links.map((link) => `
+    <div class="general-link-card">
+      <a href="${escapeHtml(link.url)}" target="_blank" rel="noopener" class="general-link-anchor">${escapeHtml(link.label)}</a>
+      <button class="btn btn-danger btn-sm" type="button" data-remove-general-link="${escapeHtml(link.id)}">Sacar</button>
+    </div>
+  `).join('') : '<div class="empty-state">Sin links generales</div>';
+
+  container.querySelectorAll('[data-remove-general-link]').forEach((button) => {
+    button.addEventListener('click', async function () {
+      if (this.classList.contains('btn-loading')) return;
+      if (!confirm('Seguro que queres sacar este link?')) return;
+      setButtonLoading(this, true, '...');
+      try {
+        await api(`/api/general-links/${this.dataset.removeGeneralLink}`, { method: 'DELETE' });
+        await refresh();
+      } catch (error) {
+        setButtonLoading(this, false);
+        alert(error.message);
+      }
+    });
+  });
+}
+
+function openGeneralLinkModal() {
+  const overlay = openModal(`
+    <div class="modal-overlay">
+      <form class="modal">
+        <div class="modal-header">Agregar Link General</div>
+        <div class="form-group">
+          <label>Descripcion</label>
+          <input type="text" id="gl-label-input" class="form-control" placeholder="Ej. Drive del equipo">
+        </div>
+        <div class="form-group">
+          <label>URL</label>
+          <input type="url" id="gl-url-input" class="form-control" placeholder="https://...">
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-secondary" type="button" data-close-modal>Cancelar</button>
+          <button class="btn" type="submit">Agregar</button>
+        </div>
+      </form>
+    </div>
+  `);
+
+  let submitting = false;
+  overlay.querySelector('form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (submitting) return;
+    const label = overlay.querySelector('#gl-label-input').value.trim();
+    const url = overlay.querySelector('#gl-url-input').value.trim();
+    if (!label || !url) return;
+    const submitButton = overlay.querySelector('button[type="submit"]');
+    submitting = true;
+    setButtonLoading(submitButton, true, 'Agregando...');
+    try {
+      await api('/api/general-links', { method: 'POST', body: JSON.stringify({ label, url }) });
+      closeModal();
+      await refresh();
+    } catch (error) {
+      submitting = false;
+      setButtonLoading(submitButton, false);
+      alert(error.message);
+    }
+  });
+}
+
+function renderEmails(emailStr) {
+  if (!emailStr) return '<span style="color: var(--text-muted);">N/A</span>';
+  const emails = emailStr.split('\n').map((e) => e.trim()).filter(Boolean);
+  if (!emails.length) return '<span style="color: var(--text-muted);">N/A</span>';
+  return emails.map((email) => escapeHtml(email)).join('<br>');
 }
 
 function auditUser() {
