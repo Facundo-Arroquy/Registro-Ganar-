@@ -69,6 +69,39 @@ export function renderSidebar({ state, currentUser, activePage, onRefresh }) {
 
   sidebar.querySelector('[data-open-board]').addEventListener('click', () => openBoardModal({ state, currentUser, onRefresh }));
   sidebar.querySelector('[data-open-invite]').addEventListener('click', () => openInviteModal({ onRefresh }));
+
+  initSidebarToggle();
+}
+
+function initSidebarToggle() {
+  const toggle = document.querySelector('.sidebar-toggle');
+  const overlay = document.querySelector('.sidebar-overlay');
+  const sidebar = document.querySelector('[data-sidebar]');
+  if (!toggle || !overlay || !sidebar) return;
+
+  function openSidebar() {
+    sidebar.classList.add('open');
+    overlay.classList.add('active');
+    toggle.innerHTML = '&#10005;';
+  }
+
+  function closeSidebar() {
+    sidebar.classList.remove('open');
+    overlay.classList.remove('active');
+    toggle.innerHTML = '&#9776;';
+  }
+
+  toggle.addEventListener('click', () => {
+    sidebar.classList.contains('open') ? closeSidebar() : openSidebar();
+  });
+
+  overlay.addEventListener('click', closeSidebar);
+
+  // Close sidebar when navigating via board click on mobile
+  sidebar.addEventListener('click', (e) => {
+    const link = e.target.closest('a.nav-btn, [data-board-id]');
+    if (link && window.innerWidth <= 780) closeSidebar();
+  });
 }
 
 async function deleteBoard({ state, currentUser, boardId, onRefresh, button }) {
