@@ -10,6 +10,8 @@
   <link rel="stylesheet" href="/styles/app.css">
 </head>
 <body data-page="dashboard">
+  <button class="sidebar-toggle" type="button" aria-label="Abrir menu">&#9776;</button>
+  <div class="sidebar-overlay"></div>
   <aside data-sidebar></aside>
   <main>
     <div class="dashboard-view">
@@ -33,6 +35,7 @@
           <h2 style="font-size: 1.1rem; font-weight: 600;">Gestion de Clientes</h2>
           <button class="btn" type="button" data-open-client>Agregar Cliente</button>
         </div>
+        <div class="table-wrap">
         <table class="table">
           <thead>
             <tr>
@@ -50,6 +53,7 @@
           </thead>
           <tbody id="clients-table-body"></tbody>
         </table>
+        </div>
       </section>
       <section class="general-links-section">
         <div class="section-header">

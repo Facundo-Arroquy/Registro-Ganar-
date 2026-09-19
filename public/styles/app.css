@@ -990,7 +990,80 @@ header {
   margin-top: 10px;
 }
 
+/* ── Hamburger button (hidden by default, shown on mobile) ── */
+.sidebar-toggle {
+  display: none;
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 1100;
+  background-color: var(--bg-sidebar);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+  line-height: 1;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+/* ── Sidebar overlay backdrop (mobile only) ── */
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.6);
+  z-index: 999;
+}
+
+.sidebar-overlay.active {
+  display: block;
+}
+
+/* ── Table responsive wrapper ── */
+.table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ── Tablet: ≤ 900px ── */
+@media (max-width: 900px) {
+  aside {
+    width: 240px;
+    padding: 16px;
+  }
+
+  .kanban-board {
+    padding: 16px;
+    gap: 12px;
+  }
+
+  .column {
+    width: 260px;
+    min-width: 260px;
+  }
+
+  .dashboard-view {
+    padding: 20px;
+    gap: 20px;
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+  }
+}
+
+/* ── Mobile: ≤ 780px ── */
 @media (max-width: 780px) {
+  .sidebar-toggle {
+    display: flex;
+  }
+
   body {
     flex-direction: column;
     overflow: auto;
@@ -999,26 +1072,185 @@ header {
   }
 
   aside {
-    width: 100%;
-    min-height: auto;
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 280px;
+    z-index: 1000;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    overflow-y: auto;
+    padding: 20px;
   }
 
-  main,
-  .kanban-board,
+  aside.open {
+    transform: translateX(0);
+  }
+
+  main {
+    width: 100%;
+    min-height: 100vh;
+  }
+
+  .kanban-board {
+    min-height: 70vh;
+    padding: 12px;
+    gap: 12px;
+  }
+
   .dashboard-view {
     min-height: 70vh;
+    padding: 16px;
+    gap: 16px;
   }
 
   header {
     height: auto;
-    min-height: 60px;
+    min-height: 56px;
     flex-wrap: wrap;
-    gap: 12px;
-    padding: 14px 18px;
+    gap: 10px;
+    padding: 12px 16px 12px 60px;
   }
 
   .section-header {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .column {
+    width: 260px;
+    min-width: 260px;
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px;
+  }
+
+  .stat-card {
+    padding: 12px;
+  }
+
+  .stat-card .value {
+    font-size: 1.4rem;
+  }
+
+  .clients-section {
+    padding: 14px;
+  }
+
+  .table {
+    font-size: 0.78rem;
+  }
+
+  .table th,
+  .table td {
+    padding: 8px 6px;
+    white-space: nowrap;
+  }
+
+  .settings-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .row-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .history-row {
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .general-links-grid {
+    flex-direction: column;
+  }
+
+  .link-add-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .modal {
+    width: min(480px, calc(100% - 16px));
+    padding: 20px;
+    max-height: calc(100vh - 40px);
+    overflow-y: auto;
+  }
+}
+
+/* ── Small phone: ≤ 480px ── */
+@media (max-width: 480px) {
+  .page-heading h1 {
+    font-size: 1.2rem;
+  }
+
+  .page-heading p {
+    font-size: 0.8rem;
+  }
+
+  header {
+    padding: 10px 12px 10px 56px;
+  }
+
+  .board-title {
+    font-size: 0.95rem;
+  }
+
+  .btn {
+    padding: 7px 10px;
+    font-size: 0.8rem;
+  }
+
+  .stats-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .stat-card .value {
+    font-size: 1.2rem;
+  }
+
+  .stat-card h3 {
+    font-size: 0.72rem;
+  }
+
+  .column {
+    width: 240px;
+    min-width: 240px;
+  }
+
+  .kanban-board {
+    padding: 10px;
+  }
+
+  .dashboard-view {
+    padding: 12px;
+    gap: 12px;
+  }
+
+  .modal {
+    padding: 16px;
+    border-radius: var(--radius-md);
+  }
+
+  .modal-overlay {
+    padding: 8px;
+  }
+
+  .modal-header {
+    font-size: 1rem;
+  }
+
+  .form-control {
+    font-size: 16px;
+  }
+
+  .login-box {
+    padding: 24px 20px;
   }
 }
