@@ -1,21 +1,14 @@
 import { createServer } from 'node:http';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, 'public');
-const dbPath = path.join(__dirname, 'data', 'db.json');
 const port = Number(process.env.PORT || 3000);
 let statusWriteQueue = Promise.resolve();
 let supportsStatusColor = true;
-const defaultStatusColors = {
-  Activo: '#3fb950',
-  'En pausa': '#d29922',
-  Riesgo: '#f85149',
-  Cerrado: '#8b949e'
-};
 
 const contentTypes = {
   '.html': 'text/html; charset=utf-8',
@@ -37,22 +30,6 @@ async function loadEnv() {
     const key = trimmedLine.slice(0, separatorIndex);
     const value = trimmedLine.slice(separatorIndex + 1).trim();
     if (process.env[key] === undefined) process.env[key] = value;
-  }
-}
-
-async function readDb() {
-  return JSON.parse(await readFile(dbPath, 'utf8'));
-}
-
-async function writeDb(db) {
-  await writeFile(dbPath, JSON.stringify(db, null, 2));
-}
-
-async function tryWriteDb(db) {
-  try {
-    await writeDb(db);
-  } catch (error) {
-    console.warn('Skipping db persistence:', error.code || error.message);
   }
 }
 
@@ -84,16 +61,18 @@ function publicUser(user) {
   return { id: user.id, email: user.email, name: user.name };
 }
 
-function hasSupabaseAuth() {
-  return Boolean(getSupabaseUrl() && getSupabaseServiceRoleKey());
-}
-
 function getSupabaseUrl() {
   return String(process.env.SUPABASE_URL || '').trim().replace(/\/+$/, '');
 }
 
 function getSupabaseServiceRoleKey() {
   return String(process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+}
+
+function ensureSupabaseConfig() {
+  if (!getSupabaseUrl() || !getSupabaseServiceRoleKey()) {
+    throw new Error('Supabase no esta configurado. Se requieren SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY en .env');
+  }
 }
 
 function decodeJwtPayload(token) {
@@ -159,93 +138,80 @@ async function getSupabaseState() {
     supabaseRest('/client_links?select=id,client_id,url,label'),
     supabaseRest('/general_links?select=id,url,label&order=created_at.asc')
   ]);
-  const statusById = new Map(statuses.map((status) => [status.id, status]));
+  const statusMap = new Map(statuses.map((status) => [status.id, status]));
   return {
     users: users.map(publicUser),
-    settings: {
-      clientStatuses: statuses.map((status) => normalizeStatus({ name: status.name, color: status.color })),
-      lastConfigChange: auditRows[0] ? mapAuditRow(auditRows[0]) : null,
-      configChanges: auditRows.map(mapAuditRow)
-    },
     clients: clients.map((client) => ({
       id: client.id,
       name: client.name,
       company: client.company,
       email: client.email || '',
       ownerId: client.owner_id || '',
-      status: statusById.get(client.status_id)?.name || 'Activo',
-      links: clientLinks.filter((link) => link.client_id === client.id).map((link) => ({ id: link.id, url: link.url, label: link.label }))
+      status: statusMap.get(client.status_id)?.name || 'Activo',
+      links: clientLinks.filter((link) => link.client_id === client.id).map((link) => ({
+        id: link.id,
+        url: link.url,
+        label: link.label
+      }))
     })),
     boards: boards.map((board) => ({
       id: board.id,
       name: board.name,
-      color: board.color || '#2b52ff',
-      columns: columns
-        .filter((column) => column.board_id === board.id)
-        .map((column) => ({
-          id: column.id,
-          name: column.name,
-          showTimer: Boolean(column.show_timer)
-        })),
-      cards: cards
-        .filter((card) => card.board_id === board.id)
-        .map((card) => ({
-          id: card.id,
-          columnId: card.column_id,
-          clientId: card.client_id || '',
-          title: card.title,
-          description: card.description || '',
-          dueDate: card.due_date || '',
-          createdBy: card.created_by || '',
-          assignedTo: card.assigned_to || '',
-          enteredColumnAt: new Date(card.entered_column_at).getTime()
-        }))
+      color: board.color,
+      columns: columns.filter((column) => column.board_id === board.id).map((column) => ({
+        id: column.id,
+        name: column.name,
+        showTimer: column.show_timer
+      })),
+      cards: cards.filter((card) => card.board_id === board.id).map((card) => ({
+        id: card.id,
+        columnId: card.column_id,
+        clientId: card.client_id || '',
+        title: card.title,
+        description: card.description || '',
+        dueDate: card.due_date || '',
+        createdBy: card.created_by || '',
+        assignedTo: card.assigned_to || '',
+        enteredColumnAt: card.entered_column_at ? new Date(card.entered_column_at).getTime() : Date.now()
+      }))
     })),
+    settings: {
+      clientStatuses: statuses.map((status) => normalizeStatus({ name: status.name, color: status.color })),
+      lastConfigChange: auditRows[0] ? mapAuditRow(auditRows[0]) : null,
+      configChanges: auditRows.map(mapAuditRow)
+    },
     generalLinks: generalLinks.map((link) => ({ id: link.id, url: link.url, label: link.label }))
-  };
-}
-
-function mapAuditRow(row) {
-  return {
-    action: row.action,
-    userId: row.user_id || '',
-    userName: row.user_name || 'Usuario',
-    at: row.created_at
   };
 }
 
 async function getStatusIdByName(statusName) {
   const statuses = await supabaseRest(`/client_statuses?select=id,name&name=eq.${encodeURIComponent(statusName || 'Activo')}&limit=1`);
-  if (statuses[0]) return statuses[0].id;
+  if (statuses.length) return statuses[0].id;
   const fallback = await supabaseRest('/client_statuses?select=id,name&order=position.asc&limit=1');
   return fallback[0]?.id;
 }
 
 async function getNextColumnPosition(boardId) {
   const columns = await supabaseRest(`/board_columns?select=position&board_id=eq.${encodeURIComponent(boardId)}&order=position.desc&limit=1`);
-  return Number(columns[0]?.position || 0) + 1;
+  return (columns[0]?.position || 0) + 1;
 }
 
 async function getNextBoardPosition() {
   const boards = await supabaseRest('/boards?select=position&order=position.desc&limit=1');
-  return Number(boards[0]?.position || 0) + 1;
+  return (boards[0]?.position || 0) + 1;
 }
 
 async function getNextStatusPosition() {
   const statuses = await supabaseRest('/client_statuses?select=position&order=position.desc&limit=1');
-  return Number(statuses[0]?.position || 0) + 1;
+  return (statuses[0]?.position || 0) + 1;
 }
 
 async function getSupabaseStatuses() {
-  if (!supportsStatusColor) {
-    return supabaseRest('/client_statuses?select=id,name,position&order=position.asc');
-  }
   try {
     return await supabaseRest('/client_statuses?select=id,name,position,color&order=position.asc');
-  } catch (error) {
-    if (!/color/i.test(error.message)) throw error;
+  } catch {
     supportsStatusColor = false;
-    return supabaseRest('/client_statuses?select=id,name,position&order=position.asc');
+    return await supabaseRest('/client_statuses?select=id,name,position&order=position.asc');
   }
 }
 
@@ -278,9 +244,17 @@ async function tryRecordSupabaseAudit(body, action) {
 
 function recordAuditInBackground(body, action) {
   const task = tryRecordSupabaseAudit(body, action);
-  // On Vercel, keep the function alive until the audit write finishes (same hook @vercel/functions waitUntil uses).
   const requestContext = globalThis[Symbol.for('@vercel/request-context')]?.get?.();
   requestContext?.waitUntil?.(task);
+}
+
+function mapAuditRow(row) {
+  return {
+    action: row.action,
+    userId: row.user_id || '',
+    userName: row.user_name,
+    at: row.created_at
+  };
 }
 
 async function getSupabaseSettings() {
@@ -310,22 +284,17 @@ async function getSupabaseClient(clientId) {
 
 async function getSupabaseBoard(boardId) {
   const encodedId = encodeURIComponent(boardId);
-  const [boards, columns, cards] = await Promise.all([
+  const [[board], columns, cards] = await Promise.all([
     supabaseRest(`/boards?select=id,name,color&id=eq.${encodedId}&limit=1`),
     supabaseRest(`/board_columns?select=id,name,show_timer&board_id=eq.${encodedId}&order=position.asc`),
     supabaseRest(`/cards?select=id,column_id,client_id,title,description,due_date,created_by,assigned_to,entered_column_at&board_id=eq.${encodedId}`)
   ]);
-  const board = boards[0];
   if (!board) return null;
   return {
     id: board.id,
     name: board.name,
-    color: board.color || '#2b52ff',
-    columns: columns.map((column) => ({
-      id: column.id,
-      name: column.name,
-      showTimer: Boolean(column.show_timer)
-    })),
+    color: board.color,
+    columns: columns.map((column) => ({ id: column.id, name: column.name, showTimer: column.show_timer })),
     cards: cards.map((card) => ({
       id: card.id,
       columnId: card.column_id,
@@ -335,7 +304,7 @@ async function getSupabaseBoard(boardId) {
       dueDate: card.due_date || '',
       createdBy: card.created_by || '',
       assignedTo: card.assigned_to || '',
-      enteredColumnAt: new Date(card.entered_column_at).getTime()
+      enteredColumnAt: card.entered_column_at ? new Date(card.entered_column_at).getTime() : Date.now()
     }))
   };
 }
@@ -364,7 +333,7 @@ async function signInWithSupabase(email, password) {
 }
 
 async function createSupabaseUser({ email, password, name }) {
-  return supabaseRequest('/auth/v1/admin/users', {
+  const data = await supabaseRequest('/auth/v1/admin/users', {
     method: 'POST',
     body: JSON.stringify({
       email,
@@ -373,6 +342,7 @@ async function createSupabaseUser({ email, password, name }) {
       user_metadata: { name }
     })
   });
+  return data.user || data;
 }
 
 async function getSupabaseUserFromToken(accessToken) {
@@ -382,9 +352,8 @@ async function getSupabaseUserFromToken(accessToken) {
       Authorization: `Bearer ${accessToken}`
     }
   });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok || !data.id || !data.email) return null;
-  return data;
+  if (!response.ok) return null;
+  return response.json();
 }
 
 const AUTH_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -419,10 +388,6 @@ async function ensureSupabaseAppUser(authUser) {
 }
 
 async function requireApiUser(req, res) {
-  if (!hasSupabaseAuth()) {
-    sendError(res, 503, 'Supabase Auth no esta configurado');
-    return null;
-  }
   const authorization = String(req.headers.authorization || '');
   const match = authorization.match(/^Bearer\s+(.+)$/i);
   if (!match) {
@@ -434,26 +399,23 @@ async function requireApiUser(req, res) {
     sendError(res, 401, 'Sesion invalida');
     return null;
   }
+  const appUser = await getSupabaseAppUserByEmail(authUser.email);
+  if (!appUser) {
+    authCache.delete(match[1]);
+    sendError(res, 401, 'Usuario eliminado');
+    return null;
+  }
   await ensureSupabaseAppUser(authUser);
-  return { id: authUser.id, email: authUser.email, name: authUser.user_metadata?.name || authUser.email };
-}
-
-function findBoard(db, boardId) {
-  return db.boards.find((board) => board.id === boardId);
-}
-
-function ensureSettings(db) {
-  db.settings = db.settings || {};
-  db.settings.clientStatuses = Array.isArray(db.settings.clientStatuses) && db.settings.clientStatuses.length
-    ? db.settings.clientStatuses.map(normalizeStatus)
-    : ['Activo', 'En pausa', 'Riesgo', 'Cerrado'].map(normalizeStatus);
-  db.settings.lastConfigChange = db.settings.lastConfigChange || null;
-  db.settings.configChanges = Array.isArray(db.settings.configChanges)
-    ? db.settings.configChanges
-    : (db.settings.lastConfigChange ? [db.settings.lastConfigChange] : []);
+  return { id: authUser.id, email: authUser.email, name: appUser.name || authUser.user_metadata?.name || authUser.email };
 }
 
 function normalizeStatus(status) {
+  const defaultStatusColors = {
+    Activo: '#3fb950',
+    'En pausa': '#d29922',
+    Riesgo: '#f85149',
+    Cerrado: '#8b949e'
+  };
   if (typeof status === 'string') {
     return { name: status, color: defaultStatusColors[status] || '#388bfd' };
   }
@@ -462,24 +424,8 @@ function normalizeStatus(status) {
   return { name, color };
 }
 
-function getStatusName(status) {
-  return typeof status === 'string' ? status : status?.name;
-}
-
 function isHexColor(color) {
   return /^#[0-9a-fA-F]{6}$/.test(String(color || ''));
-}
-
-function recordConfigChange(db, body, action) {
-  const user = db.users.find((item) => item.id === body.userId);
-  const change = {
-    action,
-    userId: user?.id || String(body.userId || ''),
-    userName: user?.name || String(body.userName || 'Usuario'),
-    at: new Date().toISOString()
-  };
-  db.settings.lastConfigChange = change;
-  db.settings.configChanges = [change, ...(db.settings.configChanges || [])].slice(0, 50);
 }
 
 async function enqueueStatusWrite(operation) {
@@ -489,27 +435,22 @@ async function enqueueStatusWrite(operation) {
 }
 
 async function handleApi(req, res, url) {
-  const db = hasSupabaseAuth() ? null : await readDb();
-  if (db) ensureSettings(db);
   const body = req.method === 'GET' ? {} : await readBody(req);
   const segments = url.pathname.split('/').filter(Boolean);
 
   if (req.method === 'POST' && url.pathname === '/api/login') {
     const email = String(body.email || '').trim().toLowerCase();
     const password = String(body.password || '');
-    if (hasSupabaseAuth()) {
-      try {
-        const auth = await signInWithSupabase(email, password);
-        const user = await syncSupabaseAppUser(auth.user);
-        syncedAppUsers.set(auth.user.id, `${auth.user.email}|${auth.user.user_metadata?.name || ''}`);
-        cacheAuthUser(auth.access_token, auth.user);
-        return sendJson(res, 200, { user: publicUser(user), accessToken: auth.access_token });
-      } catch (error) {
-        console.error('Supabase login failed:', error.message);
-        return sendError(res, 401, 'Credenciales invalidas');
-      }
+    try {
+      const auth = await signInWithSupabase(email, password);
+      const user = await syncSupabaseAppUser(auth.user);
+      syncedAppUsers.set(auth.user.id, `${auth.user.email}|${auth.user.user_metadata?.name || ''}`);
+      cacheAuthUser(auth.access_token, auth.user);
+      return sendJson(res, 200, { user: publicUser(user), accessToken: auth.access_token });
+    } catch (error) {
+      console.error('Supabase login failed:', error.message);
+      return sendError(res, 401, 'Credenciales invalidas');
     }
-    return sendError(res, 503, 'Supabase Auth no esta configurado');
   }
 
   if (req.method === 'GET' && url.pathname === '/api/auth/diagnostics') {
@@ -530,17 +471,31 @@ async function handleApi(req, res, url) {
   if (!apiUser) return;
 
   if (req.method === 'GET' && url.pathname === '/api/bootstrap') {
-    if (hasSupabaseAuth()) {
-      return sendJson(res, 200, await getSupabaseState());
-    }
-    await tryWriteDb(db);
-    return sendJson(res, 200, {
-      users: db.users.map(publicUser),
-      clients: (db.clients || []).map((client) => ({ ...client, links: client.links || [] })),
-      boards: db.boards,
-      settings: db.settings,
-      generalLinks: db.generalLinks || []
+    return sendJson(res, 200, await getSupabaseState());
+  }
+
+  if (req.method === 'PATCH' && url.pathname === '/api/users/me') {
+    const name = body.name !== undefined ? String(body.name).trim() : '';
+    const password = body.password !== undefined ? String(body.password) : '';
+    if (!name && !password) return sendError(res, 400, 'Nada que actualizar');
+    if (name && !name.trim()) return sendError(res, 400, 'El nombre no puede estar vacio');
+    if (password && password.length < 6) return sendError(res, 400, 'La contrasena debe tener al menos 6 caracteres');
+    const updates = {};
+    if (name) updates.user_metadata = { name };
+    if (password) updates.password = password;
+    await supabaseRequest(`/auth/v1/admin/users/${apiUser.id}`, {
+      method: 'PUT',
+      body: JSON.stringify(updates)
     });
+    if (name) {
+      await supabaseRest(`/app_users?id=eq.${encodeURIComponent(apiUser.id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ name })
+      });
+      syncedAppUsers.delete(apiUser.id);
+    }
+    const updatedUser = { id: apiUser.id, email: apiUser.email, name: name || apiUser.name };
+    return sendJson(res, 200, { user: publicUser(updatedUser) });
   }
 
   if (req.method === 'POST' && url.pathname === '/api/settings/client-statuses') {
@@ -548,28 +503,17 @@ async function handleApi(req, res, url) {
       const status = String(body.status || '').trim();
       const color = isHexColor(body.color) ? String(body.color) : '#388bfd';
       if (!status) return sendError(res, 400, 'El estado es obligatorio');
-      if (hasSupabaseAuth()) {
-        const statuses = await getSupabaseStatuses();
-        if (statuses.some((item) => item.name.toLowerCase() === status.toLowerCase())) {
-          return sendError(res, 400, 'Ese estado ya existe');
-        }
-        await supabaseRest('/client_statuses', {
-          method: 'POST',
-          headers: { Prefer: 'return=representation' },
-          body: JSON.stringify([statusWritePayload({ name: status, color, position: await getNextStatusPosition() })])
-        });
-        await tryRecordSupabaseAudit(body, `Agrego el estado "${status}"`);
-        return sendJson(res, 201, { settings: await getSupabaseSettings() });
-      }
-      const nextDb = await readDb();
-      ensureSettings(nextDb);
-      if (nextDb.settings.clientStatuses.some((item) => getStatusName(item).toLowerCase() === status.toLowerCase())) {
+      const statuses = await getSupabaseStatuses();
+      if (statuses.some((item) => item.name.toLowerCase() === status.toLowerCase())) {
         return sendError(res, 400, 'Ese estado ya existe');
       }
-      nextDb.settings.clientStatuses.push({ name: status, color });
-      recordConfigChange(nextDb, body, `Agrego el estado "${status}"`);
-      await writeDb(nextDb);
-      return sendJson(res, 201, { settings: nextDb.settings });
+      await supabaseRest('/client_statuses', {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify([statusWritePayload({ name: status, color, position: await getNextStatusPosition() })])
+      });
+      await tryRecordSupabaseAudit(body, `Agrego el estado "${status}"`);
+      return sendJson(res, 201, { settings: await getSupabaseSettings() });
     });
   }
 
@@ -581,78 +525,39 @@ async function handleApi(req, res, url) {
 
     if (req.method === 'PATCH') {
       return enqueueStatusWrite(async () => {
-        if (hasSupabaseAuth()) {
-          const statuses = await getSupabaseStatuses();
-          const statusRow = statuses[index];
-          if (!statusRow) return sendError(res, 404, 'Estado no encontrado');
-          const nextStatus = String(body.status || '').trim();
-          const nextColor = isHexColor(body.color) ? String(body.color) : normalizeStatus(statusRow).color;
-          if (!nextStatus) return sendError(res, 400, 'El estado es obligatorio');
-          const duplicateStatus = statuses.some((item, itemIndex) => (
-            itemIndex !== index && item.name.toLowerCase() === nextStatus.toLowerCase()
-          ));
-          if (duplicateStatus) return sendError(res, 400, 'Ese estado ya existe');
-          await supabaseRest(`/client_statuses?id=eq.${encodeURIComponent(statusRow.id)}`, {
-            method: 'PATCH',
-            body: JSON.stringify(statusWritePayload({ name: nextStatus, color: nextColor }))
-          });
-          await tryRecordSupabaseAudit(body, `Edito el estado "${statusRow.name}" a "${nextStatus}"`);
-          return sendJson(res, 200, { settings: await getSupabaseSettings() });
-        }
-        const nextDb = await readDb();
-        ensureSettings(nextDb);
-        if (index < 0 || index >= nextDb.settings.clientStatuses.length) {
-          return sendError(res, 404, 'Estado no encontrado');
-        }
-        const previousStatus = getStatusName(nextDb.settings.clientStatuses[index]);
+        const statuses = await getSupabaseStatuses();
+        const statusRow = statuses[index];
+        if (!statusRow) return sendError(res, 404, 'Estado no encontrado');
         const nextStatus = String(body.status || '').trim();
-        const nextColor = isHexColor(body.color) ? String(body.color) : nextDb.settings.clientStatuses[index].color;
+        const nextColor = isHexColor(body.color) ? String(body.color) : normalizeStatus(statusRow).color;
         if (!nextStatus) return sendError(res, 400, 'El estado es obligatorio');
-        const duplicateStatus = nextDb.settings.clientStatuses.some((item, itemIndex) => (
-          itemIndex !== index && getStatusName(item).toLowerCase() === nextStatus.toLowerCase()
+        const duplicateStatus = statuses.some((item, itemIndex) => (
+          itemIndex !== index && item.name.toLowerCase() === nextStatus.toLowerCase()
         ));
         if (duplicateStatus) return sendError(res, 400, 'Ese estado ya existe');
-        nextDb.settings.clientStatuses[index] = { name: nextStatus, color: nextColor };
-        nextDb.clients.forEach((client) => {
-          if (client.status === previousStatus) client.status = nextStatus;
+        await supabaseRest(`/client_statuses?id=eq.${encodeURIComponent(statusRow.id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify(statusWritePayload({ name: nextStatus, color: nextColor }))
         });
-        recordConfigChange(nextDb, body, `Edito el estado "${previousStatus}" a "${nextStatus}"`);
-        await writeDb(nextDb);
-        return sendJson(res, 200, { settings: nextDb.settings });
+        await tryRecordSupabaseAudit(body, `Edito el estado "${statusRow.name}" a "${nextStatus}"`);
+        return sendJson(res, 200, { settings: await getSupabaseSettings() });
       });
     }
 
     if (req.method === 'DELETE') {
       return enqueueStatusWrite(async () => {
-        if (hasSupabaseAuth()) {
-          const statuses = await getSupabaseStatuses();
-          const statusRow = statuses[index];
-          if (!statusRow) return sendError(res, 404, 'Estado no encontrado');
-          if (statuses.length <= 1) return sendError(res, 400, 'Debe conservarse al menos un estado');
-          const fallbackStatus = statuses.find((item) => item.id !== statusRow.id);
-          await supabaseRest(`/clients?status_id=eq.${encodeURIComponent(statusRow.id)}`, {
-            method: 'PATCH',
-            body: JSON.stringify({ status_id: fallbackStatus.id })
-          });
-          await supabaseRest(`/client_statuses?id=eq.${encodeURIComponent(statusRow.id)}`, { method: 'DELETE' });
-          await tryRecordSupabaseAudit(body, `Saco el estado "${statusRow.name}"`);
-          return sendJson(res, 200, { settings: await getSupabaseSettings() });
-        }
-        const nextDb = await readDb();
-        ensureSettings(nextDb);
-        if (index < 0 || index >= nextDb.settings.clientStatuses.length) {
-          return sendError(res, 404, 'Estado no encontrado');
-        }
-        if (nextDb.settings.clientStatuses.length <= 1) return sendError(res, 400, 'Debe conservarse al menos un estado');
-        const [removedStatusItem] = nextDb.settings.clientStatuses.splice(index, 1);
-        const removedStatus = getStatusName(removedStatusItem);
-        const fallbackStatus = getStatusName(nextDb.settings.clientStatuses[0]);
-        nextDb.clients.forEach((client) => {
-          if (client.status === removedStatus) client.status = fallbackStatus;
+        const statuses = await getSupabaseStatuses();
+        const statusRow = statuses[index];
+        if (!statusRow) return sendError(res, 404, 'Estado no encontrado');
+        if (statuses.length <= 1) return sendError(res, 400, 'Debe conservarse al menos un estado');
+        const fallbackStatus = statuses.find((item) => item.id !== statusRow.id);
+        await supabaseRest(`/clients?status_id=eq.${encodeURIComponent(statusRow.id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ status_id: fallbackStatus.id })
         });
-        recordConfigChange(nextDb, body, `Saco el estado "${removedStatus}"`);
-        await writeDb(nextDb);
-        return sendJson(res, 200, { settings: nextDb.settings });
+        await supabaseRest(`/client_statuses?id=eq.${encodeURIComponent(statusRow.id)}`, { method: 'DELETE' });
+        await tryRecordSupabaseAudit(body, `Saco el estado "${statusRow.name}"`);
+        return sendJson(res, 200, { settings: await getSupabaseSettings() });
       });
     }
   }
@@ -662,25 +567,34 @@ async function handleApi(req, res, url) {
     const name = String(body.name || email.split('@')[0] || '').trim();
     const password = String(body.password || '');
     if (!email) return sendError(res, 400, 'El email es obligatorio');
-    const existing = hasSupabaseAuth()
-      ? await getSupabaseAppUserByEmail(email)
-      : db.users.find((user) => user.email.toLowerCase() === email);
+    if (!name) return sendError(res, 400, 'El nombre es obligatorio');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return sendError(res, 400, 'El email no es valido');
+    if (password.length < 6) return sendError(res, 400, 'La contrasena debe tener al menos 6 caracteres');
+    const existing = await getSupabaseAppUserByEmail(email);
     if (existing) return sendJson(res, 200, { user: publicUser(existing), invited: false });
-    if (hasSupabaseAuth() && password.length < 6) return sendError(res, 400, 'La contrasena debe tener al menos 6 caracteres');
-    let user = { id: makeId('u'), email, password: '******', name };
-    if (hasSupabaseAuth()) {
+    try {
+      let authUser;
       try {
-        const auth = await createSupabaseUser({ email, password, name });
-        user = await syncSupabaseAppUser(auth.user, name);
-        recordAuditInBackground(body, `Creo el usuario "${email}"`);
-      } catch (error) {
-        return sendError(res, 400, error.message);
+        authUser = await createSupabaseUser({ email, password, name });
+      } catch (authError) {
+        if (!/already.*registered|already.*exists|duplicate/i.test(authError.message)) {
+          throw authError;
+        }
+        const allAuthUsers = await supabaseRequest('/auth/v1/admin/users');
+        authUser = (allAuthUsers.users || []).find((u) => u.email === email);
+        if (!authUser) throw authError;
+        await supabaseRequest(`/auth/v1/admin/users/${authUser.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({ user_metadata: { name }, password })
+        });
       }
+      const user = await syncSupabaseAppUser(authUser, name);
+      const auditBody = { userId: apiUser.id, userName: apiUser.name };
+      recordAuditInBackground(auditBody, `Invito al usuario "${name}" (${email})`);
       return sendJson(res, 201, { user: publicUser(user), invited: true });
+    } catch (error) {
+      return sendError(res, 400, error.message);
     }
-    db.users.push(user);
-    await tryWriteDb(db);
-    return sendJson(res, 201, { user: publicUser(user), invited: true });
   }
 
   if (req.method === 'POST' && url.pathname === '/api/clients') {
@@ -693,68 +607,51 @@ async function handleApi(req, res, url) {
       status: String(body.status || 'Activo').trim()
     };
     if (!client.name || !client.company) return sendError(res, 400, 'Nombre y empresa son obligatorios');
-    if (hasSupabaseAuth()) {
-      const statusId = await getStatusIdByName(client.status);
-      const [createdClient] = await supabaseRest('/clients', {
-        method: 'POST',
-        headers: { Prefer: 'return=representation' },
-        body: JSON.stringify([{
-          id: client.id,
-          name: client.name,
-          company: client.company,
-          email: client.email || null,
-          owner_id: client.ownerId || null,
-          status_id: statusId
-        }])
-      });
-      recordAuditInBackground(body, `Creo el cliente "${client.name}"`);
-      return sendJson(res, 201, { client: { ...client, id: createdClient.id } });
-    }
-    db.clients.push(client);
-    await writeDb(db);
-    return sendJson(res, 201, { client });
+    const statusId = await getStatusIdByName(client.status);
+    const [createdClient] = await supabaseRest('/clients', {
+      method: 'POST',
+      headers: { Prefer: 'return=representation' },
+      body: JSON.stringify([{
+        id: client.id,
+        name: client.name,
+        company: client.company,
+        email: client.email || null,
+        owner_id: client.ownerId || null,
+        status_id: statusId
+      }])
+    });
+    recordAuditInBackground(body, `Creo el cliente "${client.name}"`);
+    return sendJson(res, 201, { client: { ...client, id: createdClient.id } });
   }
 
   if (segments[0] === 'api' && segments[1] === 'clients' && segments[2]) {
     const requestedClientId = segments[2];
-    const client = hasSupabaseAuth()
-      ? await getSupabaseClient(requestedClientId)
-      : db.clients.find((item) => item.id === requestedClientId);
+    const client = await getSupabaseClient(requestedClientId);
     if (!client) return sendError(res, 404, 'Cliente no encontrado');
 
     if (req.method === 'PATCH' && segments.length === 3) {
-      if (hasSupabaseAuth()) {
-        const payload = {
-          name: body.name === undefined ? client.name : String(body.name).trim(),
-          company: body.company === undefined ? client.company : String(body.company).trim(),
-          email: body.email === undefined ? client.email : String(body.email).trim(),
-          ownerId: body.ownerId === undefined ? client.ownerId || '' : String(body.ownerId),
-          status: body.status === undefined ? client.status || 'Activo' : String(body.status || 'Activo').trim()
-        };
-        if (!payload.name || !payload.company) return sendError(res, 400, 'Nombre y empresa son obligatorios');
-        const statusId = await getStatusIdByName(payload.status);
-        await supabaseRest(`/clients?id=eq.${encodeURIComponent(client.id)}`, {
-          method: 'PATCH',
-          headers: { Prefer: 'return=representation' },
-          body: JSON.stringify({
-            name: payload.name,
-            company: payload.company,
-            email: payload.email || null,
-            owner_id: payload.ownerId || null,
-            status_id: statusId
-          })
-        });
-        recordAuditInBackground(body, `Modifico el cliente "${client.name}"`);
-        return sendJson(res, 200, { client: { id: client.id, ...payload } });
-      }
-      client.name = body.name === undefined ? client.name : String(body.name).trim();
-      client.company = body.company === undefined ? client.company : String(body.company).trim();
-      client.email = body.email === undefined ? client.email : String(body.email).trim();
-      client.ownerId = body.ownerId === undefined ? client.ownerId || '' : String(body.ownerId);
-      client.status = body.status === undefined ? client.status || 'Activo' : String(body.status || 'Activo').trim();
-      if (!client.name || !client.company) return sendError(res, 400, 'Nombre y empresa son obligatorios');
-      await writeDb(db);
-      return sendJson(res, 200, { client });
+      const payload = {
+        name: body.name === undefined ? client.name : String(body.name).trim(),
+        company: body.company === undefined ? client.company : String(body.company).trim(),
+        email: body.email === undefined ? client.email : String(body.email).trim(),
+        ownerId: body.ownerId === undefined ? client.ownerId || '' : String(body.ownerId),
+        status: body.status === undefined ? client.status || 'Activo' : String(body.status || 'Activo').trim()
+      };
+      if (!payload.name || !payload.company) return sendError(res, 400, 'Nombre y empresa son obligatorios');
+      const statusId = await getStatusIdByName(payload.status);
+      await supabaseRest(`/clients?id=eq.${encodeURIComponent(client.id)}`, {
+        method: 'PATCH',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify({
+          name: payload.name,
+          company: payload.company,
+          email: payload.email || null,
+          owner_id: payload.ownerId || null,
+          status_id: statusId
+        })
+      });
+      recordAuditInBackground(body, `Modifico el cliente "${client.name}"`);
+      return sendJson(res, 200, { client: { id: client.id, ...payload } });
     }
 
     if (req.method === 'POST' && segments[3] === 'links' && segments.length === 4) {
@@ -762,28 +659,17 @@ async function handleApi(req, res, url) {
       const label = String(body.label || '').trim();
       if (!linkUrl || !label) return sendError(res, 400, 'URL y descripcion son obligatorios');
       const link = { id: makeId('lnk'), url: linkUrl, label };
-      if (hasSupabaseAuth()) {
-        await supabaseRest('/client_links', {
-          method: 'POST',
-          headers: { Prefer: 'return=representation' },
-          body: JSON.stringify([{ id: link.id, client_id: client.id, url: link.url, label: link.label }])
-        });
-        return sendJson(res, 201, { link });
-      }
-      if (!client.links) client.links = [];
-      client.links.push(link);
-      await writeDb(db);
+      await supabaseRest('/client_links', {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify([{ id: link.id, client_id: client.id, url: link.url, label: link.label }])
+      });
       return sendJson(res, 201, { link });
     }
 
     if (req.method === 'DELETE' && segments[3] === 'links' && segments[4]) {
       const linkId = segments[4];
-      if (hasSupabaseAuth()) {
-        await supabaseRest(`/client_links?id=eq.${encodeURIComponent(linkId)}&client_id=eq.${encodeURIComponent(client.id)}`, { method: 'DELETE' });
-        return sendJson(res, 200, { deleted: true });
-      }
-      client.links = (client.links || []).filter((link) => link.id !== linkId);
-      await writeDb(db);
+      await supabaseRest(`/client_links?id=eq.${encodeURIComponent(linkId)}&client_id=eq.${encodeURIComponent(client.id)}`, { method: 'DELETE' });
       return sendJson(res, 200, { deleted: true });
     }
   }
@@ -793,55 +679,23 @@ async function handleApi(req, res, url) {
     const label = String(body.label || '').trim();
     if (!linkUrl || !label) return sendError(res, 400, 'URL y descripcion son obligatorios');
     const link = { id: makeId('gl'), url: linkUrl, label };
-    if (hasSupabaseAuth()) {
-      await supabaseRest('/general_links', {
-        method: 'POST',
-        headers: { Prefer: 'return=representation' },
-        body: JSON.stringify([{ id: link.id, url: link.url, label: link.label }])
-      });
-      return sendJson(res, 201, { link });
-    }
-    if (!db.generalLinks) db.generalLinks = [];
-    db.generalLinks.push(link);
-    await writeDb(db);
+    await supabaseRest('/general_links', {
+      method: 'POST',
+      headers: { Prefer: 'return=representation' },
+      body: JSON.stringify([{ id: link.id, url: link.url, label: link.label }])
+    });
     return sendJson(res, 201, { link });
   }
 
   if (req.method === 'DELETE' && segments[0] === 'api' && segments[1] === 'general-links' && segments[2]) {
     const linkId = segments[2];
-    if (hasSupabaseAuth()) {
-      await supabaseRest(`/general_links?id=eq.${encodeURIComponent(linkId)}`, { method: 'DELETE' });
-      return sendJson(res, 200, { deleted: true });
-    }
-    db.generalLinks = (db.generalLinks || []).filter((link) => link.id !== linkId);
-    await writeDb(db);
+    await supabaseRest(`/general_links?id=eq.${encodeURIComponent(linkId)}`, { method: 'DELETE' });
     return sendJson(res, 200, { deleted: true });
   }
 
   if (req.method === 'POST' && url.pathname === '/api/boards') {
     const name = String(body.name || '').trim();
     if (!name) return sendError(res, 400, 'El nombre es obligatorio');
-    if (hasSupabaseAuth()) {
-      const board = {
-        id: makeId('b'),
-        name,
-        color: '#2b52ff',
-        columns: [{ id: makeId('c'), name: 'Pendiente', showTimer: false }],
-        cards: []
-      };
-      await supabaseRest('/boards', {
-        method: 'POST',
-        headers: { Prefer: 'return=representation' },
-        body: JSON.stringify([{ id: board.id, name: board.name, color: board.color, position: await getNextBoardPosition() }])
-      });
-      await supabaseRest('/board_columns', {
-        method: 'POST',
-        headers: { Prefer: 'return=representation' },
-        body: JSON.stringify([{ id: board.columns[0].id, board_id: board.id, name: board.columns[0].name, show_timer: false, position: 1 }])
-      });
-      recordAuditInBackground(body, `Creo el tablero "${name}"`);
-      return sendJson(res, 201, { board });
-    }
     const board = {
       id: makeId('b'),
       name,
@@ -849,99 +703,78 @@ async function handleApi(req, res, url) {
       columns: [{ id: makeId('c'), name: 'Pendiente', showTimer: false }],
       cards: []
     };
-    db.boards.push(board);
-    recordConfigChange(db, body, `Creo el tablero "${name}"`);
-    await writeDb(db);
+    await supabaseRest('/boards', {
+      method: 'POST',
+      headers: { Prefer: 'return=representation' },
+      body: JSON.stringify([{ id: board.id, name: board.name, color: board.color, position: await getNextBoardPosition() }])
+    });
+    await supabaseRest('/board_columns', {
+      method: 'POST',
+      headers: { Prefer: 'return=representation' },
+      body: JSON.stringify([{ id: board.columns[0].id, board_id: board.id, name: board.columns[0].name, show_timer: false, position: 1 }])
+    });
+    recordAuditInBackground(body, `Creo el tablero "${name}"`);
     return sendJson(res, 201, { board });
   }
 
   if (segments[0] === 'api' && segments[1] === 'boards' && segments[2]) {
-    const board = hasSupabaseAuth()
-      ? await getSupabaseBoard(segments[2])
-      : findBoard(db, segments[2]);
+    const board = await getSupabaseBoard(segments[2]);
     if (!board) return sendError(res, 404, 'Tablero no encontrado');
 
     if (req.method === 'PATCH' && segments.length === 3) {
       const name = String(body.name || '').trim();
       if (!name) return sendError(res, 400, 'El nombre es obligatorio');
-      if (hasSupabaseAuth()) {
-        await supabaseRest(`/boards?id=eq.${encodeURIComponent(board.id)}`, {
-          method: 'PATCH',
-          headers: { Prefer: 'return=representation' },
-          body: JSON.stringify({ name })
-        });
-        recordAuditInBackground(body, `Renombro el tablero "${board.name}" a "${name}"`);
-        return sendJson(res, 200, { board: { ...board, name } });
-      }
-      const previousName = board.name;
-      board.name = name;
-      recordConfigChange(db, body, `Renombro el tablero "${previousName}" a "${name}"`);
-      await writeDb(db);
-      return sendJson(res, 200, { board });
+      await supabaseRest(`/boards?id=eq.${encodeURIComponent(board.id)}`, {
+        method: 'PATCH',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify({ name })
+      });
+      recordAuditInBackground(body, `Renombro el tablero "${board.name}" a "${name}"`);
+      return sendJson(res, 200, { board: { ...board, name } });
     }
 
     if (req.method === 'DELETE' && segments.length === 3) {
-      if (hasSupabaseAuth()) {
-        const boards = await supabaseRest('/boards?select=id,name,color&order=position.asc');
-        if (boards.length <= 1) return sendError(res, 400, 'Debe conservarse al menos un tablero');
-        await supabaseRest(`/boards?id=eq.${encodeURIComponent(board.id)}`, { method: 'DELETE' });
-        recordAuditInBackground(body, `Elimino el tablero "${board.name}"`);
-        return sendJson(res, 200, { boards: boards.filter((item) => item.id !== board.id) });
-      }
-      if (db.boards.length <= 1) return sendError(res, 400, 'Debe conservarse al menos un tablero');
-      const boardName = board.name;
-      db.boards = db.boards.filter((item) => item.id !== board.id);
-      recordConfigChange(db, body, `Elimino el tablero "${boardName}"`);
-      await writeDb(db);
-      return sendJson(res, 200, { boards: db.boards });
+      const boards = await supabaseRest('/boards?select=id,name,color&order=position.asc');
+      if (boards.length <= 1) return sendError(res, 400, 'Debe conservarse al menos un tablero');
+      await supabaseRest(`/boards?id=eq.${encodeURIComponent(board.id)}`, { method: 'DELETE' });
+      recordAuditInBackground(body, `Elimino el tablero "${board.name}"`);
+      return sendJson(res, 200, { boards: boards.filter((item) => item.id !== board.id) });
     }
 
     if (req.method === 'POST' && segments[3] === 'columns') {
       const name = String(body.name || '').trim();
       if (!name) return sendError(res, 400, 'El nombre es obligatorio');
       const column = { id: makeId('c'), name, showTimer: Boolean(body.showTimer) };
-      if (hasSupabaseAuth()) {
-        await supabaseRest('/board_columns', {
-          method: 'POST',
-          headers: { Prefer: 'return=representation' },
-          body: JSON.stringify([{
-            id: column.id,
-            board_id: board.id,
-            name: column.name,
-            show_timer: column.showTimer,
-            position: await getNextColumnPosition(board.id)
-          }])
-        });
-        board.columns.push(column);
-        recordAuditInBackground(body, `Creo la columna "${name}" en "${board.name}"`);
-        return sendJson(res, 201, { column, board });
-      }
+      await supabaseRest('/board_columns', {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify([{
+          id: column.id,
+          board_id: board.id,
+          name: column.name,
+          show_timer: column.showTimer,
+          position: await getNextColumnPosition(board.id)
+        }])
+      });
       board.columns.push(column);
-      recordConfigChange(db, body, `Creo la columna "${name}" en "${board.name}"`);
-      await writeDb(db);
+      recordAuditInBackground(body, `Creo la columna "${name}" en "${board.name}"`);
       return sendJson(res, 201, { column, board });
     }
 
     if (req.method === 'PATCH' && segments[3] === 'columns' && segments[4] === 'order') {
       const columnIds = Array.isArray(body.columnIds) ? body.columnIds : [];
       if (columnIds.length !== board.columns.length) return sendError(res, 400, 'Orden de columnas invalido');
-      if (hasSupabaseAuth()) {
-        const offset = 10000;
-        await Promise.all(columnIds.map((id, index) => supabaseRest(`/board_columns?id=eq.${encodeURIComponent(id)}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ position: index + 1 + offset })
-        })));
-        await Promise.all(columnIds.map((id, index) => supabaseRest(`/board_columns?id=eq.${encodeURIComponent(id)}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ position: index + 1 })
-        })));
-        board.columns = columnIds.map((id) => board.columns.find((column) => column.id === id)).filter(Boolean);
-        recordAuditInBackground(body, `Reordeno columnas en "${board.name}"`);
-        return sendJson(res, 200, { board });
-      }
+      const offset = 10000;
+      await Promise.all(columnIds.map((id, index) => supabaseRest(`/board_columns?id=eq.${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ position: index + 1 + offset })
+      })));
+      await Promise.all(columnIds.map((id, index) => supabaseRest(`/board_columns?id=eq.${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ position: index + 1 })
+      })));
       board.columns = columnIds.map((id) => board.columns.find((column) => column.id === id)).filter(Boolean);
-      recordConfigChange(db, body, `Reordeno columnas en "${board.name}"`);
-      await writeDb(db);
+      recordAuditInBackground(body, `Reordeno columnas en "${board.name}"`);
       return sendJson(res, 200, { board });
     }
 
@@ -949,17 +782,10 @@ async function handleApi(req, res, url) {
       const columnId = segments[4];
       if (board.columns.length <= 1) return sendError(res, 400, 'Debe conservarse al menos una columna');
       if (board.cards.some((card) => card.columnId === columnId)) return sendError(res, 400, 'La columna contiene tarjetas');
-      if (hasSupabaseAuth()) {
-        const column = board.columns.find((item) => item.id === columnId);
-        await supabaseRest(`/board_columns?id=eq.${encodeURIComponent(columnId)}`, { method: 'DELETE' });
-        board.columns = board.columns.filter((column) => column.id !== columnId);
-        recordAuditInBackground(body, `Elimino la columna "${column?.name || columnId}" de "${board.name}"`);
-        return sendJson(res, 200, { board });
-      }
       const column = board.columns.find((item) => item.id === columnId);
+      await supabaseRest(`/board_columns?id=eq.${encodeURIComponent(columnId)}`, { method: 'DELETE' });
       board.columns = board.columns.filter((column) => column.id !== columnId);
-      recordConfigChange(db, body, `Elimino la columna "${column?.name || columnId}" de "${board.name}"`);
-      await writeDb(db);
+      recordAuditInBackground(body, `Elimino la columna "${column?.name || columnId}" de "${board.name}"`);
       return sendJson(res, 200, { board });
     }
 
@@ -978,30 +804,24 @@ async function handleApi(req, res, url) {
         enteredColumnAt: Date.now()
       };
       if (!board.columns.some((column) => column.id === card.columnId)) return sendError(res, 400, 'Columna invalida');
-      if (hasSupabaseAuth()) {
-        await supabaseRest('/cards', {
-          method: 'POST',
-          headers: { Prefer: 'return=representation' },
-          body: JSON.stringify([{
-            id: card.id,
-            board_id: board.id,
-            column_id: card.columnId,
-            client_id: card.clientId || null,
-            title: card.title,
-            description: card.description,
-            due_date: card.dueDate || null,
-            created_by: card.createdBy || null,
-            assigned_to: card.assignedTo || null,
-            entered_column_at: new Date(card.enteredColumnAt).toISOString()
-          }])
-        });
-        board.cards.push(card);
-        recordAuditInBackground(body, `Creo la tarjeta "${title}" en "${board.name}"`);
-        return sendJson(res, 201, { card, board });
-      }
+      await supabaseRest('/cards', {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify([{
+          id: card.id,
+          board_id: board.id,
+          column_id: card.columnId,
+          client_id: card.clientId || null,
+          title: card.title,
+          description: card.description,
+          due_date: card.dueDate || null,
+          created_by: card.createdBy || null,
+          assigned_to: card.assignedTo || null,
+          entered_column_at: new Date(card.enteredColumnAt).toISOString()
+        }])
+      });
       board.cards.push(card);
-      recordConfigChange(db, body, `Creo la tarjeta "${title}" en "${board.name}"`);
-      await writeDb(db);
+      recordAuditInBackground(body, `Creo la tarjeta "${title}" en "${board.name}"`);
       return sendJson(res, 201, { card, board });
     }
 
@@ -1021,51 +841,34 @@ async function handleApi(req, res, url) {
       if (!card.title) return sendError(res, 400, 'El titulo es obligatorio');
       if (!board.columns.some((column) => column.id === card.columnId)) return sendError(res, 400, 'Columna invalida');
       if (previousColumnId !== card.columnId) card.enteredColumnAt = Date.now();
-      if (hasSupabaseAuth()) {
-        await supabaseRest(`/cards?id=eq.${encodeURIComponent(card.id)}`, {
-          method: 'PATCH',
-          headers: { Prefer: 'return=representation' },
-          body: JSON.stringify({
-            column_id: card.columnId,
-            client_id: card.clientId || null,
-            title: card.title,
-            description: card.description,
-            due_date: card.dueDate || null,
-            assigned_to: card.assignedTo || null,
-            entered_column_at: new Date(card.enteredColumnAt).toISOString()
-          })
-        });
-        if (previousColumnId !== card.columnId) {
-          const fromColumn = board.columns.find((column) => column.id === previousColumnId);
-          const toColumn = board.columns.find((column) => column.id === card.columnId);
-          recordAuditInBackground(body, `Movio la tarjeta "${card.title}" de "${fromColumn?.name || previousColumnId}" a "${toColumn?.name || card.columnId}"`);
-        } else {
-          recordAuditInBackground(body, `Modifico la tarjeta "${previousTitle}" en "${board.name}"`);
-        }
-        return sendJson(res, 200, { card, board });
-      }
+      await supabaseRest(`/cards?id=eq.${encodeURIComponent(card.id)}`, {
+        method: 'PATCH',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify({
+          column_id: card.columnId,
+          client_id: card.clientId || null,
+          title: card.title,
+          description: card.description,
+          due_date: card.dueDate || null,
+          assigned_to: card.assignedTo || null,
+          entered_column_at: new Date(card.enteredColumnAt).toISOString()
+        })
+      });
       if (previousColumnId !== card.columnId) {
         const fromColumn = board.columns.find((column) => column.id === previousColumnId);
         const toColumn = board.columns.find((column) => column.id === card.columnId);
-        recordConfigChange(db, body, `Movio la tarjeta "${card.title}" de "${fromColumn?.name || previousColumnId}" a "${toColumn?.name || card.columnId}"`);
+        recordAuditInBackground(body, `Movio la tarjeta "${card.title}" de "${fromColumn?.name || previousColumnId}" a "${toColumn?.name || card.columnId}"`);
       } else {
-        recordConfigChange(db, body, `Modifico la tarjeta "${previousTitle}" en "${board.name}"`);
+        recordAuditInBackground(body, `Modifico la tarjeta "${previousTitle}" en "${board.name}"`);
       }
-      await writeDb(db);
       return sendJson(res, 200, { card, board });
     }
 
     if (req.method === 'DELETE' && segments[3] === 'cards' && segments[4]) {
       const card = board.cards.find((item) => item.id === segments[4]);
-      if (hasSupabaseAuth()) {
-        await supabaseRest(`/cards?id=eq.${encodeURIComponent(segments[4])}`, { method: 'DELETE' });
-        board.cards = board.cards.filter((card) => card.id !== segments[4]);
-        recordAuditInBackground(body, `Elimino la tarjeta "${card?.title || segments[4]}" de "${board.name}"`);
-        return sendJson(res, 200, { board });
-      }
+      await supabaseRest(`/cards?id=eq.${encodeURIComponent(segments[4])}`, { method: 'DELETE' });
       board.cards = board.cards.filter((card) => card.id !== segments[4]);
-      recordConfigChange(db, body, `Elimino la tarjeta "${card?.title || segments[4]}" de "${board.name}"`);
-      await writeDb(db);
+      recordAuditInBackground(body, `Elimino la tarjeta "${card?.title || segments[4]}" de "${board.name}"`);
       return sendJson(res, 200, { board });
     }
   }
@@ -1118,6 +921,7 @@ server.on('error', (error) => {
 });
 
 await loadEnv();
+ensureSupabaseConfig();
 
 server.listen(port, () => {
   console.log(`Registro Ganar v0 listo en http://localhost:${port}`);

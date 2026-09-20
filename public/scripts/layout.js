@@ -1,4 +1,4 @@
-import { api, clearSession } from './api.js';
+import { api, clearSession, setSessionUser, getSessionToken } from './api.js';
 import { escapeHtml, getInitials, setButtonLoading } from './utils.js';
 
 export function renderSidebar({ state, currentUser, activePage, onRefresh }) {
@@ -21,7 +21,7 @@ export function renderSidebar({ state, currentUser, activePage, onRefresh }) {
     </div>
 
     <div class="user-profile">
-      <div class="inline-user">
+      <div class="inline-user" data-open-profile style="cursor: pointer;" title="Editar perfil">
         <div class="avatar">${getInitials(currentUser.name)}</div>
         <span style="font-size: 0.85rem; font-weight: 500;">${escapeHtml(currentUser.name)}</span>
       </div>
@@ -69,6 +69,7 @@ export function renderSidebar({ state, currentUser, activePage, onRefresh }) {
 
   sidebar.querySelector('[data-open-board]').addEventListener('click', () => openBoardModal({ state, currentUser, onRefresh }));
   sidebar.querySelector('[data-open-invite]').addEventListener('click', () => openInviteModal({ onRefresh }));
+  sidebar.querySelector('[data-open-profile]').addEventListener('click', () => openProfileModal({ currentUser, onRefresh }));
 
   initSidebarToggle();
 }
@@ -268,24 +269,85 @@ function auditUser(currentUser) {
   return { userId: currentUser.id, userName: currentUser.name };
 }
 
+function openProfileModal({ currentUser, onRefresh }) {
+  const overlay = openModal(`
+    <div class="modal-overlay">
+      <form class="modal">
+        <div class="modal-header">Editar Perfil</div>
+        <div class="form-group">
+          <label for="profile-name-input">Nombre</label>
+          <input type="text" id="profile-name-input" class="form-control" value="${escapeHtml(currentUser.name)}" required>
+        </div>
+        <div class="form-group">
+          <label for="profile-password-input">Nueva contrasena</label>
+          <input type="password" id="profile-password-input" class="form-control" autocomplete="new-password" minlength="6" placeholder="Dejar vacio para no cambiar">
+          <small style="color: var(--text-muted); font-size: 0.75rem;">Minimo 6 caracteres.</small>
+        </div>
+        <div id="profile-error" style="display: none; color: var(--error); font-size: 0.8rem; margin-bottom: 8px;"></div>
+        <div class="modal-actions">
+          <button class="btn btn-secondary" type="button" data-close-modal>Cancelar</button>
+          <button class="btn" type="submit">Guardar</button>
+        </div>
+      </form>
+    </div>
+  `);
+
+  const errorEl = overlay.querySelector('#profile-error');
+  function showError(msg) {
+    errorEl.textContent = msg;
+    errorEl.style.display = 'block';
+  }
+
+  let submitting = false;
+  overlay.querySelector('form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (submitting) return;
+    errorEl.style.display = 'none';
+    const name = overlay.querySelector('#profile-name-input').value.trim();
+    const password = overlay.querySelector('#profile-password-input').value;
+    if (!name) return showError('El nombre es obligatorio');
+    if (password && password.length < 6) return showError('La contrasena debe tener al menos 6 caracteres');
+    const noChanges = name === currentUser.name && !password;
+    if (noChanges) { closeModal(); return; }
+    const submitButton = overlay.querySelector('button[type="submit"]');
+    submitting = true;
+    setButtonLoading(submitButton, true, 'Guardando...');
+    try {
+      const payload = {};
+      if (name !== currentUser.name) payload.name = name;
+      if (password) payload.password = password;
+      const { user } = await api('/api/users/me', { method: 'PATCH', body: JSON.stringify(payload) });
+      setSessionUser(user, getSessionToken());
+      closeModal();
+      await onRefresh();
+    } catch (error) {
+      submitting = false;
+      setButtonLoading(submitButton, false);
+      showError(error.message);
+    }
+  });
+}
+
 function openInviteModal({ onRefresh }) {
   const overlay = openModal(`
     <div class="modal-overlay">
       <form class="modal">
-        <div class="modal-header">Crear Usuario</div>
-        <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 12px;">Crea un usuario inicial en Supabase Auth.</p>
+        <div class="modal-header">Invitar Usuario</div>
+        <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 12px;">Crea una cuenta para que el usuario pueda iniciar sesion.</p>
         <div class="form-group">
-          <label for="invite-name-input">Nombre</label>
-          <input type="text" id="invite-name-input" class="form-control" placeholder="Ej. Ana Gomez">
+          <label for="invite-name-input">Nombre completo</label>
+          <input type="text" id="invite-name-input" class="form-control" placeholder="Ej. Ana Gomez" required>
         </div>
         <div class="form-group">
-          <label for="invite-email-input">Correo Electronico</label>
-          <input type="email" id="invite-email-input" class="form-control" placeholder="usuario@correo.com">
+          <label for="invite-email-input">Correo electronico</label>
+          <input type="email" id="invite-email-input" class="form-control" placeholder="usuario@correo.com" required>
         </div>
         <div class="form-group">
           <label for="invite-password-input">Contrasena inicial</label>
-          <input type="password" id="invite-password-input" class="form-control" autocomplete="new-password" minlength="6">
+          <input type="password" id="invite-password-input" class="form-control" autocomplete="new-password" minlength="6" required>
+          <small style="color: var(--text-muted); font-size: 0.75rem;">Minimo 6 caracteres. El usuario podra cambiarla despues.</small>
         </div>
+        <div id="invite-error" style="display: none; color: var(--error); font-size: 0.8rem; margin-bottom: 8px;"></div>
         <div class="modal-actions">
           <button class="btn btn-secondary" type="button" data-close-modal>Cancelar</button>
           <button class="btn" type="submit">Crear Usuario</button>
@@ -294,25 +356,37 @@ function openInviteModal({ onRefresh }) {
     </div>
   `);
 
+  const errorEl = overlay.querySelector('#invite-error');
+  function showError(msg) {
+    errorEl.textContent = msg;
+    errorEl.style.display = 'block';
+  }
+
   let submitting = false;
   overlay.querySelector('form').addEventListener('submit', async (event) => {
     event.preventDefault();
     if (submitting) return;
+    errorEl.style.display = 'none';
     const name = overlay.querySelector('#invite-name-input').value.trim();
     const email = overlay.querySelector('#invite-email-input').value.trim();
     const password = overlay.querySelector('#invite-password-input').value;
-    if (!name || !email || !password) return;
+    if (!name) return showError('El nombre es obligatorio');
+    if (!email) return showError('El correo es obligatorio');
+    if (password.length < 6) return showError('La contrasena debe tener al menos 6 caracteres');
     const submitButton = overlay.querySelector('button[type="submit"]');
     submitting = true;
     setButtonLoading(submitButton, true, 'Creando...');
     try {
-      await api('/api/users/invitations', { method: 'POST', body: JSON.stringify({ name, email, password }) });
+      const result = await api('/api/users/invitations', { method: 'POST', body: JSON.stringify({ name, email, password }) });
       closeModal();
+      if (result.invited === false) {
+        alert(`El usuario ${email} ya existe en el sistema.`);
+      }
       await onRefresh();
     } catch (error) {
       submitting = false;
       setButtonLoading(submitButton, false);
-      alert(error.message);
+      showError(error.message);
     }
   });
 }
