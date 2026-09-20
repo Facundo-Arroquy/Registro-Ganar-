@@ -333,7 +333,7 @@ async function signInWithSupabase(email, password) {
 }
 
 async function createSupabaseUser({ email, password, name }) {
-  return supabaseRequest('/auth/v1/admin/users', {
+  const data = await supabaseRequest('/auth/v1/admin/users', {
     method: 'POST',
     body: JSON.stringify({
       email,
@@ -342,6 +342,7 @@ async function createSupabaseUser({ email, password, name }) {
       user_metadata: { name }
     })
   });
+  return data.user || data;
 }
 
 async function getSupabaseUserFromToken(accessToken) {
@@ -398,8 +399,14 @@ async function requireApiUser(req, res) {
     sendError(res, 401, 'Sesion invalida');
     return null;
   }
+  const appUser = await getSupabaseAppUserByEmail(authUser.email);
+  if (!appUser) {
+    authCache.delete(match[1]);
+    sendError(res, 401, 'Usuario eliminado');
+    return null;
+  }
   await ensureSupabaseAppUser(authUser);
-  return { id: authUser.id, email: authUser.email, name: authUser.user_metadata?.name || authUser.email };
+  return { id: authUser.id, email: authUser.email, name: appUser.name || authUser.user_metadata?.name || authUser.email };
 }
 
 function normalizeStatus(status) {
@@ -566,8 +573,22 @@ async function handleApi(req, res, url) {
     const existing = await getSupabaseAppUserByEmail(email);
     if (existing) return sendJson(res, 200, { user: publicUser(existing), invited: false });
     try {
-      const auth = await createSupabaseUser({ email, password, name });
-      const user = await syncSupabaseAppUser(auth.user, name);
+      let authUser;
+      try {
+        authUser = await createSupabaseUser({ email, password, name });
+      } catch (authError) {
+        if (!/already.*registered|already.*exists|duplicate/i.test(authError.message)) {
+          throw authError;
+        }
+        const allAuthUsers = await supabaseRequest('/auth/v1/admin/users');
+        authUser = (allAuthUsers.users || []).find((u) => u.email === email);
+        if (!authUser) throw authError;
+        await supabaseRequest(`/auth/v1/admin/users/${authUser.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({ user_metadata: { name }, password })
+        });
+      }
+      const user = await syncSupabaseAppUser(authUser, name);
       const auditBody = { userId: apiUser.id, userName: apiUser.name };
       recordAuditInBackground(auditBody, `Invito al usuario "${name}" (${email})`);
       return sendJson(res, 201, { user: publicUser(user), invited: true });
