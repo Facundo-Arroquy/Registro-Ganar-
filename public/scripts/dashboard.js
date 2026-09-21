@@ -207,15 +207,15 @@ function openClientModal(client = null) {
         </div>
         <div class="form-group">
           <label>Dia de reunion</label>
-          <div class="meeting-fields">
-            <select id="client-meeting-day" class="form-control">
+          <div style="display: flex; gap: 8px;">
+            <select id="client-meeting-day" class="form-control" style="flex: 1;">
               <option value="">Sin reunion</option>
-              ${[['1','Lunes'],['2','Martes'],['3','Miercoles'],['4','Jueves'],['5','Viernes'],['6','Sabado'],['0','Domingo']].map(([value, label]) =>
-                `<option value="${value}" ${client?.meetingDay !== null && String(client?.meetingDay) === value ? 'selected' : ''}>${label}</option>`
+              ${[['1','Lunes'],['2','Martes'],['3','Miercoles'],['4','Jueves'],['5','Viernes'],['6','Sabado'],['0','Domingo']].map(([v,l]) =>
+                `<option value="${v}" ${client?.meetingDay !== null && String(client?.meetingDay) === v ? 'selected' : ''}>${l}</option>`
               ).join('')}
             </select>
-            <input type="time" id="client-meeting-time" class="form-control" value="${escapeHtml((client?.meetingTime || '').slice(0, 5))}">
-            <select id="client-meeting-freq" class="form-control">
+            <input type="time" id="client-meeting-time" class="form-control" style="flex: 1;" value="${escapeHtml((client?.meetingTime || '').slice(0, 5))}">
+            <select id="client-meeting-freq" class="form-control" style="flex: 1;">
               <option value="">Frecuencia</option>
               <option value="7" ${client?.meetingFrequency === 7 ? 'selected' : ''}>Cada 7 dias</option>
               <option value="15" ${client?.meetingFrequency === 15 ? 'selected' : ''}>Cada 15 dias</option>
@@ -293,18 +293,17 @@ function openClientModal(client = null) {
   overlay.querySelector('form').addEventListener('submit', async (event) => {
     event.preventDefault();
     if (submitting) return;
-    const meetingDay = overlay.querySelector('#client-meeting-day').value;
+    const meetingDayVal = overlay.querySelector('#client-meeting-day').value;
     const payload = {
       name: overlay.querySelector('#client-name-input').value.trim(),
       company: overlay.querySelector('#client-company-input').value.trim(),
       email: overlay.querySelector('#client-email-input').value.trim(),
       ownerId: overlay.querySelector('#client-owner-input').value,
-      consultor: overlay.querySelector('#client-consultor-input').value.trim(),
       status: overlay.querySelector('#client-status-input').value,
       complexity: overlay.querySelector('#client-complexity-input').value,
       adStatus: overlay.querySelector('#client-ad-status-input').value,
       meliUser: overlay.querySelector('#client-meli-user-input').value.trim(),
-      meetingDay: meetingDay === '' ? null : Number(meetingDay),
+      meetingDay: meetingDayVal !== '' ? Number(meetingDayVal) : null,
       meetingTime: overlay.querySelector('#client-meeting-time').value || null,
       meetingFrequency: overlay.querySelector('#client-meeting-freq').value ? Number(overlay.querySelector('#client-meeting-freq').value) : null
     };
@@ -358,14 +357,16 @@ function statusOptions(selectedStatus) {
 }
 
 function adStatusOptions(selected) {
-  return (state.settings?.adStatuses || []).map((item) => {
+  const items = state.settings?.adStatuses || [];
+  return items.map((item) => {
     const name = typeof item === 'string' ? item : item?.name || '';
     return `<option value="${escapeHtml(name)}" ${name === selected ? 'selected' : ''}>${escapeHtml(name)}</option>`;
   }).join('');
 }
 
 function complexityOptions(selected) {
-  return (state.settings?.complexities || []).map((item) => {
+  const complexities = state.settings?.complexities || [];
+  return complexities.map((item) => {
     const name = typeof item === 'string' ? item : item?.name || '';
     return `<option value="${escapeHtml(name)}" ${name === selected ? 'selected' : ''}>${escapeHtml(name)}</option>`;
   }).join('');
@@ -397,51 +398,32 @@ function statusBadge(status) {
   return `<span class="status-badge custom-status" style="--status-color: ${escapeHtml(color)};">${escapeHtml(status)}</span>`;
 }
 
-function isHexColor(color) {
-  return /^#[0-9a-fA-F]{6}$/.test(String(color || ''));
-}
-
 function adStatusBadge(name) {
-  const item = (state.settings?.adStatuses || []).find((entry) => (typeof entry === 'string' ? entry : entry?.name) === name);
-  const color = item && typeof item === 'object' && isHexColor(item.color) ? item.color : '#388bfd';
+  const items = state.settings?.adStatuses || [];
+  const item = items.find((a) => (typeof a === 'string' ? a : a?.name) === name);
+  const color = (item && typeof item === 'object' && isHexColor(item.color)) ? item.color : '#388bfd';
   return `<span class="status-badge custom-status" style="--status-color: ${escapeHtml(color)};">${escapeHtml(name)}</span>`;
 }
 
 function complexityBadge(name) {
-  const item = (state.settings?.complexities || []).find((entry) => (typeof entry === 'string' ? entry : entry?.name) === name);
-  const color = item && typeof item === 'object' && isHexColor(item.color) ? item.color : '#388bfd';
+  const complexities = state.settings?.complexities || [];
+  const item = complexities.find((c) => (typeof c === 'string' ? c : c?.name) === name);
+  const color = (item && typeof item === 'object' && isHexColor(item.color)) ? item.color : '#388bfd';
   return `<span class="status-badge custom-status" style="--status-color: ${escapeHtml(color)};">${escapeHtml(name)}</span>`;
 }
 
-function getClientConsultors() {
-  return state.settings?.clientConsultors?.length ? state.settings.clientConsultors : [];
-}
-
-function getConsultorColor(consultor) {
-  const item = getClientConsultors().find((c) => (typeof c === 'string' ? c : c?.name) === consultor);
-  if (item && typeof item === 'object' && isHexColor(item.color)) return item.color;
-  return '#388bfd';
-}
-
-function consultorBadge(consultor) {
-  const color = getConsultorColor(consultor);
-  return `<span class="status-badge custom-status" style="--status-color: ${escapeHtml(color)};">${escapeHtml(consultor)}</span>`;
-}
-
-function consultorOptions(selectedConsultor) {
-  return `<option value="">Sin asignar</option>${getClientConsultors().map((item) => {
-    const name = typeof item === 'string' ? item : item?.name || '';
-    return `<option value="${escapeHtml(name)}" ${name === selectedConsultor ? 'selected' : ''}>${escapeHtml(name)}</option>`;
-  }).join('')}`;
+function isHexColor(color) {
+  return /^#[0-9a-fA-F]{6}$/.test(String(color || ''));
 }
 
 function formatMeeting(client) {
   if (client.meetingDay === null || client.meetingDay === undefined) return '<span style="color: var(--text-muted);">-</span>';
-  const day = ['Dom', 'Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab'][client.meetingDay];
+  const days = ['Dom', 'Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab'];
+  const day = days[client.meetingDay];
   if (!day) return '<span style="color: var(--text-muted);">-</span>';
   const time = (client.meetingTime || '').slice(0, 5);
-  const frequency = client.meetingFrequency === 7 ? 'c/7d' : client.meetingFrequency === 15 ? 'c/15d' : '';
-  const parts = [day, time, frequency].filter(Boolean);
+  const freq = client.meetingFrequency === 7 ? 'c/7d' : client.meetingFrequency === 15 ? 'c/15d' : '';
+  const parts = [day, time, freq].filter(Boolean);
   return parts.length ? `<span class="meeting-badge">${escapeHtml(parts.join(' '))}</span>` : '<span style="color: var(--text-muted);">-</span>';
 }
 
