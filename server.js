@@ -8,7 +8,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, 'public');
 const port = Number(process.env.PORT || 3000);
 let statusWriteQueue = Promise.resolve();
+let complexityWriteQueue = Promise.resolve();
+let adStatusWriteQueue = Promise.resolve();
 let supportsStatusColor = true;
+let supportsComplexityColor = true;
+let supportsAdStatusColor = true;
 
 const contentTypes = {
   '.html': 'text/html; charset=utf-8',
@@ -127,11 +131,13 @@ async function supabaseRest(pathname, options = {}) {
 }
 
 async function getSupabaseState() {
-  const [users, statuses, auditRows, clients, boards, columns, cards, clientLinks, generalLinks] = await Promise.all([
+  const [users, statuses, complexities, adStatuses, auditRows, clients, boards, columns, cards, clientLinks, generalLinks] = await Promise.all([
     supabaseRest('/app_users?select=id,email,name&order=name.asc'),
     getSupabaseStatuses(),
+    getSupabaseComplexities(),
+    getSupabaseAdStatuses(),
     supabaseRest('/settings_audit?select=action,user_id,user_name,created_at&order=created_at.desc&limit=50'),
-    supabaseRest('/clients?select=id,name,company,email,owner_id,status_id'),
+    supabaseRest('/clients?select=id,name,company,email,owner_id,status_id,complexity_id,ad_status_id,meli_user,meeting_day,meeting_time,meeting_frequency'),
     supabaseRest('/boards?select=id,name,color,position&order=position.asc'),
     supabaseRest('/board_columns?select=id,board_id,name,show_timer,position&order=position.asc'),
     supabaseRest('/cards?select=id,board_id,column_id,client_id,title,description,due_date,created_by,assigned_to,entered_column_at'),
@@ -139,6 +145,8 @@ async function getSupabaseState() {
     supabaseRest('/general_links?select=id,url,label&order=created_at.asc')
   ]);
   const statusMap = new Map(statuses.map((status) => [status.id, status]));
+  const complexityMap = new Map(complexities.map((c) => [c.id, c]));
+  const adStatusMap = new Map(adStatuses.map((a) => [a.id, a]));
   return {
     users: users.map(publicUser),
     clients: clients.map((client) => ({
@@ -148,6 +156,12 @@ async function getSupabaseState() {
       email: client.email || '',
       ownerId: client.owner_id || '',
       status: statusMap.get(client.status_id)?.name || 'Activo',
+      complexity: complexityMap.get(client.complexity_id)?.name || '',
+      adStatus: adStatusMap.get(client.ad_status_id)?.name || '',
+      meliUser: client.meli_user || '',
+      meetingDay: client.meeting_day ?? null,
+      meetingTime: client.meeting_time || '',
+      meetingFrequency: client.meeting_frequency ?? null,
       links: clientLinks.filter((link) => link.client_id === client.id).map((link) => ({
         id: link.id,
         url: link.url,
@@ -177,6 +191,8 @@ async function getSupabaseState() {
     })),
     settings: {
       clientStatuses: statuses.map((status) => normalizeStatus({ name: status.name, color: status.color })),
+      complexities: complexities.map((c) => normalizeComplexity({ name: c.name, color: c.color })),
+      adStatuses: adStatuses.map((a) => normalizeAdStatus({ name: a.name, color: a.color })),
       lastConfigChange: auditRows[0] ? mapAuditRow(auditRows[0]) : null,
       configChanges: auditRows.map(mapAuditRow)
     },
@@ -208,7 +224,9 @@ async function getNextStatusPosition() {
 
 async function getSupabaseStatuses() {
   try {
-    return await supabaseRest('/client_statuses?select=id,name,position,color&order=position.asc');
+    const rows = await supabaseRest('/client_statuses?select=id,name,position,color&order=position.asc');
+    supportsStatusColor = true;
+    return rows;
   } catch {
     supportsStatusColor = false;
     return await supabaseRest('/client_statuses?select=id,name,position&order=position.asc');
@@ -221,6 +239,94 @@ function statusWritePayload(payload) {
     return rest;
   }
   return payload;
+}
+
+async function getNextComplexityPosition() {
+  const rows = await supabaseRest('/complexities?select=position&order=position.desc&limit=1');
+  return (rows[0]?.position || 0) + 1;
+}
+
+async function getSupabaseComplexities() {
+  try {
+    const rows = await supabaseRest('/complexities?select=id,name,position,color&order=position.asc');
+    supportsComplexityColor = true;
+    return rows;
+  } catch {
+    supportsComplexityColor = false;
+    return await supabaseRest('/complexities?select=id,name,position&order=position.asc');
+  }
+}
+
+function complexityWritePayload(payload) {
+  if (!supportsComplexityColor) {
+    const { color, ...rest } = payload;
+    return rest;
+  }
+  return payload;
+}
+
+function normalizeComplexity(complexity) {
+  if (typeof complexity === 'string') {
+    return { name: complexity, color: '#388bfd' };
+  }
+  const name = String(complexity?.name || '').trim();
+  const color = isHexColor(complexity?.color) ? complexity.color : '#388bfd';
+  return { name, color };
+}
+
+async function getComplexityIdByName(name) {
+  const rows = await supabaseRest(`/complexities?select=id,name&name=eq.${encodeURIComponent(name || '')}&limit=1`);
+  if (rows.length) return rows[0].id;
+  return null;
+}
+
+async function enqueueComplexityWrite(operation) {
+  const current = complexityWriteQueue.then(operation).catch((error) => { throw error; });
+  complexityWriteQueue = current.catch(() => {});
+  return current;
+}
+
+async function getNextAdStatusPosition() {
+  const rows = await supabaseRest('/ad_statuses?select=position&order=position.desc&limit=1');
+  return (rows[0]?.position || 0) + 1;
+}
+
+async function getSupabaseAdStatuses() {
+  try {
+    const rows = await supabaseRest('/ad_statuses?select=id,name,position,color&order=position.asc');
+    supportsAdStatusColor = true;
+    return rows;
+  } catch {
+    supportsAdStatusColor = false;
+    return await supabaseRest('/ad_statuses?select=id,name,position&order=position.asc');
+  }
+}
+
+function adStatusWritePayload(payload) {
+  if (!supportsAdStatusColor) {
+    const { color, ...rest } = payload;
+    return rest;
+  }
+  return payload;
+}
+
+function normalizeAdStatus(item) {
+  if (typeof item === 'string') return { name: item, color: '#388bfd' };
+  const name = String(item?.name || '').trim();
+  const color = isHexColor(item?.color) ? item.color : '#388bfd';
+  return { name, color };
+}
+
+async function getAdStatusIdByName(name) {
+  if (!name) return null;
+  const rows = await supabaseRest(`/ad_statuses?select=id,name&name=eq.${encodeURIComponent(name)}&limit=1`);
+  return rows.length ? rows[0].id : null;
+}
+
+async function enqueueAdStatusWrite(operation) {
+  const current = adStatusWriteQueue.then(operation).catch((error) => { throw error; });
+  adStatusWriteQueue = current.catch(() => {});
+  return current;
 }
 
 async function recordSupabaseAudit(body, action) {
@@ -258,19 +364,23 @@ function mapAuditRow(row) {
 }
 
 async function getSupabaseSettings() {
-  const [statuses, auditRows] = await Promise.all([
+  const [statuses, complexities, adStatuses, auditRows] = await Promise.all([
     getSupabaseStatuses(),
+    getSupabaseComplexities(),
+    getSupabaseAdStatuses(),
     supabaseRest('/settings_audit?select=action,user_id,user_name,created_at&order=created_at.desc&limit=50')
   ]);
   return {
     clientStatuses: statuses.map((status) => normalizeStatus({ name: status.name, color: status.color })),
+    complexities: complexities.map((c) => normalizeComplexity({ name: c.name, color: c.color })),
+    adStatuses: adStatuses.map((a) => normalizeAdStatus({ name: a.name, color: a.color })),
     lastConfigChange: auditRows[0] ? mapAuditRow(auditRows[0]) : null,
     configChanges: auditRows.map(mapAuditRow)
   };
 }
 
 async function getSupabaseClient(clientId) {
-  const [client] = await supabaseRest(`/clients?select=id,name,company,email,owner_id,status:client_statuses(name)&id=eq.${encodeURIComponent(clientId)}&limit=1`);
+  const [client] = await supabaseRest(`/clients?select=id,name,company,email,owner_id,meeting_day,meeting_time,meeting_frequency,complexity_id,ad_status_id,meli_user,status:client_statuses(name),complexity:complexities(name),ad_status:ad_statuses(name)&id=eq.${encodeURIComponent(clientId)}&limit=1`);
   if (!client) return null;
   return {
     id: client.id,
@@ -278,7 +388,13 @@ async function getSupabaseClient(clientId) {
     company: client.company,
     email: client.email || '',
     ownerId: client.owner_id || '',
-    status: client.status?.name || 'Activo'
+    status: client.status?.name || 'Activo',
+    complexity: client.complexity?.name || '',
+    adStatus: client.ad_status?.name || '',
+    meliUser: client.meli_user || '',
+    meetingDay: client.meeting_day ?? null,
+    meetingTime: client.meeting_time || '',
+    meetingFrequency: client.meeting_frequency ?? null
   };
 }
 
@@ -428,6 +544,24 @@ function isHexColor(color) {
   return /^#[0-9a-fA-F]{6}$/.test(String(color || ''));
 }
 
+function parseMeetingDay(value) {
+  if (value === null || value === '' || value === undefined) return null;
+  const day = Number(value);
+  return Number.isInteger(day) && day >= 0 && day <= 6 ? day : null;
+}
+
+function parseMeetingTime(value) {
+  if (!value) return null;
+  const str = String(value).trim();
+  return /^\d{2}:\d{2}(:\d{2})?$/.test(str) ? str.slice(0, 5) : null;
+}
+
+function parseMeetingFrequency(value) {
+  if (value === null || value === '' || value === undefined) return null;
+  const freq = Number(value);
+  return freq === 7 || freq === 15 ? freq : null;
+}
+
 async function enqueueStatusWrite(operation) {
   const result = statusWriteQueue.then(operation, operation);
   statusWriteQueue = result.catch(() => {});
@@ -562,6 +696,128 @@ async function handleApi(req, res, url) {
     }
   }
 
+  if (req.method === 'POST' && url.pathname === '/api/settings/complexities') {
+    return enqueueComplexityWrite(async () => {
+      const name = String(body.status || '').trim();
+      const color = isHexColor(body.color) ? String(body.color) : '#388bfd';
+      if (!name) return sendError(res, 400, 'El nombre es obligatorio');
+      const existing = await getSupabaseComplexities();
+      if (existing.some((item) => item.name.toLowerCase() === name.toLowerCase())) {
+        return sendError(res, 400, 'Esa complejidad ya existe');
+      }
+      await supabaseRest('/complexities', {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify([complexityWritePayload({ name, color, position: await getNextComplexityPosition() })])
+      });
+      await tryRecordSupabaseAudit(body, `Agrego la complejidad "${name}"`);
+      return sendJson(res, 201, { settings: await getSupabaseSettings() });
+    });
+  }
+
+  if (segments[0] === 'api' && segments[1] === 'settings' && segments[2] === 'complexities' && segments[3]) {
+    const index = Number(segments[3]);
+    if (!Number.isInteger(index) || index < 0) {
+      return sendError(res, 404, 'Complejidad no encontrada');
+    }
+
+    if (req.method === 'PATCH') {
+      return enqueueComplexityWrite(async () => {
+        const complexities = await getSupabaseComplexities();
+        const row = complexities[index];
+        if (!row) return sendError(res, 404, 'Complejidad no encontrada');
+        const nextName = String(body.status || '').trim();
+        const nextColor = isHexColor(body.color) ? String(body.color) : normalizeComplexity(row).color;
+        if (!nextName) return sendError(res, 400, 'El nombre es obligatorio');
+        const duplicate = complexities.some((item, i) => i !== index && item.name.toLowerCase() === nextName.toLowerCase());
+        if (duplicate) return sendError(res, 400, 'Esa complejidad ya existe');
+        await supabaseRest(`/complexities?id=eq.${encodeURIComponent(row.id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify(complexityWritePayload({ name: nextName, color: nextColor }))
+        });
+        await tryRecordSupabaseAudit(body, `Edito la complejidad "${row.name}" a "${nextName}"`);
+        return sendJson(res, 200, { settings: await getSupabaseSettings() });
+      });
+    }
+
+    if (req.method === 'DELETE') {
+      return enqueueComplexityWrite(async () => {
+        const complexities = await getSupabaseComplexities();
+        const row = complexities[index];
+        if (!row) return sendError(res, 404, 'Complejidad no encontrada');
+        if (complexities.length <= 1) return sendError(res, 400, 'Debe conservarse al menos una complejidad');
+        const fallback = complexities.find((item) => item.id !== row.id);
+        await supabaseRest(`/clients?complexity_id=eq.${encodeURIComponent(row.id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ complexity_id: fallback.id })
+        });
+        await supabaseRest(`/complexities?id=eq.${encodeURIComponent(row.id)}`, { method: 'DELETE' });
+        await tryRecordSupabaseAudit(body, `Saco la complejidad "${row.name}"`);
+        return sendJson(res, 200, { settings: await getSupabaseSettings() });
+      });
+    }
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/settings/ad-statuses') {
+    return enqueueAdStatusWrite(async () => {
+      const name = String(body.status || '').trim();
+      const color = isHexColor(body.color) ? String(body.color) : '#388bfd';
+      if (!name) return sendError(res, 400, 'El nombre es obligatorio');
+      const existing = await getSupabaseAdStatuses();
+      if (existing.some((item) => item.name.toLowerCase() === name.toLowerCase())) {
+        return sendError(res, 400, 'Ese estado de publicidad ya existe');
+      }
+      await supabaseRest('/ad_statuses', {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify([adStatusWritePayload({ name, color, position: await getNextAdStatusPosition() })])
+      });
+      await tryRecordSupabaseAudit(body, `Agrego el estado de publicidad "${name}"`);
+      return sendJson(res, 201, { settings: await getSupabaseSettings() });
+    });
+  }
+
+  if (segments[0] === 'api' && segments[1] === 'settings' && segments[2] === 'ad-statuses' && segments[3]) {
+    const index = Number(segments[3]);
+    if (!Number.isInteger(index) || index < 0) return sendError(res, 404, 'Estado de publicidad no encontrado');
+
+    if (req.method === 'PATCH') {
+      return enqueueAdStatusWrite(async () => {
+        const items = await getSupabaseAdStatuses();
+        const row = items[index];
+        if (!row) return sendError(res, 404, 'Estado de publicidad no encontrado');
+        const nextName = String(body.status || '').trim();
+        const nextColor = isHexColor(body.color) ? String(body.color) : normalizeAdStatus(row).color;
+        if (!nextName) return sendError(res, 400, 'El nombre es obligatorio');
+        const duplicate = items.some((item, i) => i !== index && item.name.toLowerCase() === nextName.toLowerCase());
+        if (duplicate) return sendError(res, 400, 'Ese estado de publicidad ya existe');
+        await supabaseRest(`/ad_statuses?id=eq.${encodeURIComponent(row.id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify(adStatusWritePayload({ name: nextName, color: nextColor }))
+        });
+        await tryRecordSupabaseAudit(body, `Edito el estado de publicidad "${row.name}" a "${nextName}"`);
+        return sendJson(res, 200, { settings: await getSupabaseSettings() });
+      });
+    }
+
+    if (req.method === 'DELETE') {
+      return enqueueAdStatusWrite(async () => {
+        const items = await getSupabaseAdStatuses();
+        const row = items[index];
+        if (!row) return sendError(res, 404, 'Estado de publicidad no encontrado');
+        if (items.length <= 1) return sendError(res, 400, 'Debe conservarse al menos un estado de publicidad');
+        const fallback = items.find((item) => item.id !== row.id);
+        await supabaseRest(`/clients?ad_status_id=eq.${encodeURIComponent(row.id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ ad_status_id: fallback.id })
+        });
+        await supabaseRest(`/ad_statuses?id=eq.${encodeURIComponent(row.id)}`, { method: 'DELETE' });
+        await tryRecordSupabaseAudit(body, `Saco el estado de publicidad "${row.name}"`);
+        return sendJson(res, 200, { settings: await getSupabaseSettings() });
+      });
+    }
+  }
+
   if (req.method === 'POST' && url.pathname === '/api/users/invitations') {
     const email = String(body.email || '').trim().toLowerCase();
     const name = String(body.name || email.split('@')[0] || '').trim();
@@ -604,10 +860,18 @@ async function handleApi(req, res, url) {
       company: String(body.company || '').trim(),
       email: String(body.email || '').trim(),
       ownerId: String(body.ownerId || ''),
-      status: String(body.status || 'Activo').trim()
+      status: String(body.status || 'Activo').trim(),
+      complexity: String(body.complexity || '').trim(),
+      adStatus: String(body.adStatus || '').trim(),
+      meliUser: String(body.meliUser || '').trim(),
+      meetingDay: parseMeetingDay(body.meetingDay),
+      meetingTime: parseMeetingTime(body.meetingTime),
+      meetingFrequency: parseMeetingFrequency(body.meetingFrequency)
     };
     if (!client.name || !client.company) return sendError(res, 400, 'Nombre y empresa son obligatorios');
     const statusId = await getStatusIdByName(client.status);
+    const complexityId = client.complexity ? await getComplexityIdByName(client.complexity) : null;
+    const adStatusId = client.adStatus ? await getAdStatusIdByName(client.adStatus) : null;
     const [createdClient] = await supabaseRest('/clients', {
       method: 'POST',
       headers: { Prefer: 'return=representation' },
@@ -617,7 +881,13 @@ async function handleApi(req, res, url) {
         company: client.company,
         email: client.email || null,
         owner_id: client.ownerId || null,
-        status_id: statusId
+        status_id: statusId,
+        complexity_id: complexityId,
+        ad_status_id: adStatusId,
+        meli_user: client.meliUser || null,
+        meeting_day: client.meetingDay,
+        meeting_time: client.meetingTime,
+        meeting_frequency: client.meetingFrequency
       }])
     });
     recordAuditInBackground(body, `Creo el cliente "${client.name}"`);
@@ -635,10 +905,18 @@ async function handleApi(req, res, url) {
         company: body.company === undefined ? client.company : String(body.company).trim(),
         email: body.email === undefined ? client.email : String(body.email).trim(),
         ownerId: body.ownerId === undefined ? client.ownerId || '' : String(body.ownerId),
-        status: body.status === undefined ? client.status || 'Activo' : String(body.status || 'Activo').trim()
+        status: body.status === undefined ? client.status || 'Activo' : String(body.status || 'Activo').trim(),
+        complexity: body.complexity === undefined ? client.complexity || '' : String(body.complexity || '').trim(),
+        adStatus: body.adStatus === undefined ? client.adStatus || '' : String(body.adStatus || '').trim(),
+        meliUser: body.meliUser === undefined ? client.meliUser || '' : String(body.meliUser || '').trim(),
+        meetingDay: body.meetingDay === undefined ? client.meetingDay : parseMeetingDay(body.meetingDay),
+        meetingTime: body.meetingTime === undefined ? client.meetingTime : parseMeetingTime(body.meetingTime),
+        meetingFrequency: body.meetingFrequency === undefined ? client.meetingFrequency : parseMeetingFrequency(body.meetingFrequency)
       };
       if (!payload.name || !payload.company) return sendError(res, 400, 'Nombre y empresa son obligatorios');
       const statusId = await getStatusIdByName(payload.status);
+      const complexityId = payload.complexity ? await getComplexityIdByName(payload.complexity) : null;
+      const adStatusId = payload.adStatus ? await getAdStatusIdByName(payload.adStatus) : null;
       await supabaseRest(`/clients?id=eq.${encodeURIComponent(client.id)}`, {
         method: 'PATCH',
         headers: { Prefer: 'return=representation' },
@@ -647,7 +925,13 @@ async function handleApi(req, res, url) {
           company: payload.company,
           email: payload.email || null,
           owner_id: payload.ownerId || null,
-          status_id: statusId
+          status_id: statusId,
+          complexity_id: complexityId,
+          ad_status_id: adStatusId,
+          meli_user: payload.meliUser || null,
+          meeting_day: payload.meetingDay,
+          meeting_time: payload.meetingTime,
+          meeting_frequency: payload.meetingFrequency
         })
       });
       recordAuditInBackground(body, `Modifico el cliente "${client.name}"`);

@@ -68,6 +68,9 @@ function renderDashboard() {
       <td>${links.length ? links.map((link) => `<a href="${escapeHtml(link.url)}" target="_blank" rel="noopener" class="client-link" data-stop-row-click>${escapeHtml(link.label)}</a>`).join(' ') : '<span style="color: var(--text-muted);">-</span>'}</td>
       <td>${owner ? escapeHtml(owner.name) : '<span style="color: var(--text-muted);">Sin asignar</span>'}</td>
       <td>${statusBadge(client.status || 'Activo')}</td>
+      <td>${client.complexity ? complexityBadge(client.complexity) : '<span style="color: var(--text-muted);">-</span>'}</td>
+      <td>${client.adStatus ? adStatusBadge(client.adStatus) : '<span style="color: var(--text-muted);">-</span>'}</td>
+      <td>${formatMeeting(client)}</td>
       <td><span class="card-count">${clientCards.length} tareas</span></td>
       <td><span class="card-count">${timedCards.length} tags</span></td>
       <td>${averageMs ? `<span class="time-badge">${escapeHtml(formatDuration(averageMs))}</span>` : '<span style="color: var(--text-muted);">Sin datos</span>'}</td>
@@ -117,6 +120,9 @@ function getSortValue(row, column) {
     case 'links': return row.links.length;
     case 'owner': return (row.owner?.name || '').toLowerCase();
     case 'status': return (row.client.status || 'Activo').toLowerCase();
+    case 'complexity': return (row.client.complexity || '').toLowerCase();
+    case 'adStatus': return (row.client.adStatus || '').toLowerCase();
+    case 'meeting': return row.client.meetingDay ?? 99;
     case 'cards': return row.cards.length;
     case 'timedCards': return row.timedCards.length;
     case 'avgTime': return row.averageMs;
@@ -172,6 +178,41 @@ function openClientModal(client = null) {
           <select id="client-status-input" class="form-control">
             ${statusOptions(client?.status || 'Activo')}
           </select>
+        </div>
+        <div class="form-group">
+          <label>Complejidad</label>
+          <select id="client-complexity-input" class="form-control">
+            <option value="">Sin complejidad</option>
+            ${complexityOptions(client?.complexity || '')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Publicidad</label>
+          <select id="client-ad-status-input" class="form-control">
+            <option value="">Sin definir</option>
+            ${adStatusOptions(client?.adStatus || '')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Usuario Meli</label>
+          <input type="text" id="client-meli-user-input" class="form-control" placeholder="Ej. email@gmail.com | clave" value="${escapeHtml(client?.meliUser || '')}">
+        </div>
+        <div class="form-group">
+          <label>Dia de reunion</label>
+          <div style="display: flex; gap: 8px;">
+            <select id="client-meeting-day" class="form-control" style="flex: 1;">
+              <option value="">Sin reunion</option>
+              ${[['1','Lunes'],['2','Martes'],['3','Miercoles'],['4','Jueves'],['5','Viernes'],['6','Sabado'],['0','Domingo']].map(([v,l]) =>
+                `<option value="${v}" ${client?.meetingDay !== null && String(client?.meetingDay) === v ? 'selected' : ''}>${l}</option>`
+              ).join('')}
+            </select>
+            <input type="time" id="client-meeting-time" class="form-control" style="flex: 1;" value="${escapeHtml((client?.meetingTime || '').slice(0, 5))}">
+            <select id="client-meeting-freq" class="form-control" style="flex: 1;">
+              <option value="">Frecuencia</option>
+              <option value="7" ${client?.meetingFrequency === 7 ? 'selected' : ''}>Cada 7 dias</option>
+              <option value="15" ${client?.meetingFrequency === 15 ? 'selected' : ''}>Cada 15 dias</option>
+            </select>
+          </div>
         </div>
         ${isEdit ? `
         <div class="form-group">
@@ -244,12 +285,19 @@ function openClientModal(client = null) {
   overlay.querySelector('form').addEventListener('submit', async (event) => {
     event.preventDefault();
     if (submitting) return;
+    const meetingDayVal = overlay.querySelector('#client-meeting-day').value;
     const payload = {
       name: overlay.querySelector('#client-name-input').value.trim(),
       company: overlay.querySelector('#client-company-input').value.trim(),
       email: overlay.querySelector('#client-email-input').value.trim(),
       ownerId: overlay.querySelector('#client-owner-input').value,
-      status: overlay.querySelector('#client-status-input').value
+      status: overlay.querySelector('#client-status-input').value,
+      complexity: overlay.querySelector('#client-complexity-input').value,
+      adStatus: overlay.querySelector('#client-ad-status-input').value,
+      meliUser: overlay.querySelector('#client-meli-user-input').value.trim(),
+      meetingDay: meetingDayVal !== '' ? Number(meetingDayVal) : null,
+      meetingTime: overlay.querySelector('#client-meeting-time').value || null,
+      meetingFrequency: overlay.querySelector('#client-meeting-freq').value ? Number(overlay.querySelector('#client-meeting-freq').value) : null
     };
     if (!payload.name || !payload.company) return;
     if (isEdit && !client.id) {
@@ -300,6 +348,22 @@ function statusOptions(selectedStatus) {
   }).join('');
 }
 
+function adStatusOptions(selected) {
+  const items = state.settings?.adStatuses || [];
+  return items.map((item) => {
+    const name = typeof item === 'string' ? item : item?.name || '';
+    return `<option value="${escapeHtml(name)}" ${name === selected ? 'selected' : ''}>${escapeHtml(name)}</option>`;
+  }).join('');
+}
+
+function complexityOptions(selected) {
+  const complexities = state.settings?.complexities || [];
+  return complexities.map((item) => {
+    const name = typeof item === 'string' ? item : item?.name || '';
+    return `<option value="${escapeHtml(name)}" ${name === selected ? 'selected' : ''}>${escapeHtml(name)}</option>`;
+  }).join('');
+}
+
 function getClientStatuses() {
   return state.settings?.clientStatuses?.length ? state.settings.clientStatuses : ['Activo'];
 }
@@ -326,8 +390,33 @@ function statusBadge(status) {
   return `<span class="status-badge custom-status" style="--status-color: ${escapeHtml(color)};">${escapeHtml(status)}</span>`;
 }
 
+function adStatusBadge(name) {
+  const items = state.settings?.adStatuses || [];
+  const item = items.find((a) => (typeof a === 'string' ? a : a?.name) === name);
+  const color = (item && typeof item === 'object' && isHexColor(item.color)) ? item.color : '#388bfd';
+  return `<span class="status-badge custom-status" style="--status-color: ${escapeHtml(color)};">${escapeHtml(name)}</span>`;
+}
+
+function complexityBadge(name) {
+  const complexities = state.settings?.complexities || [];
+  const item = complexities.find((c) => (typeof c === 'string' ? c : c?.name) === name);
+  const color = (item && typeof item === 'object' && isHexColor(item.color)) ? item.color : '#388bfd';
+  return `<span class="status-badge custom-status" style="--status-color: ${escapeHtml(color)};">${escapeHtml(name)}</span>`;
+}
+
 function isHexColor(color) {
   return /^#[0-9a-fA-F]{6}$/.test(String(color || ''));
+}
+
+function formatMeeting(client) {
+  if (client.meetingDay === null || client.meetingDay === undefined) return '<span style="color: var(--text-muted);">-</span>';
+  const days = ['Dom', 'Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab'];
+  const day = days[client.meetingDay];
+  if (!day) return '<span style="color: var(--text-muted);">-</span>';
+  const time = (client.meetingTime || '').slice(0, 5);
+  const freq = client.meetingFrequency === 7 ? 'c/7d' : client.meetingFrequency === 15 ? 'c/15d' : '';
+  const parts = [day, time, freq].filter(Boolean);
+  return parts.length ? `<span class="meeting-badge">${escapeHtml(parts.join(' '))}</span>` : '<span style="color: var(--text-muted);">-</span>';
 }
 
 function renderGeneralLinks() {
