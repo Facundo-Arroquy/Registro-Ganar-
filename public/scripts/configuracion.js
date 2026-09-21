@@ -29,16 +29,13 @@ function renderPage() {
     onRefresh: refresh
   });
   document.querySelector('[data-add-status]').onclick = () => openStatusModal();
-  document.querySelector('[data-add-ad-status]').onclick = () => openAdStatusModal();
   document.querySelector('[data-add-consultor]').onclick = () => openConsultorModal();
-  renderStatuses();
-  renderAdStatuses();
-  renderConsultors();
   document.querySelector('[data-add-complexity]').onclick = () => openComplexityModal();
   document.querySelector('[data-add-ad-status]').onclick = () => openAdStatusModal();
   renderStatuses();
   renderComplexities();
   renderAdStatuses();
+  renderConsultors();
   renderHistory();
 }
 
@@ -510,150 +507,6 @@ function formatDateTime(value) {
     dateStyle: 'short',
     timeStyle: 'short'
   }).format(new Date(value));
-}
-
-// --- Advertising tags ---
-
-function getAdStatuses() {
-  return state.settings?.adStatuses?.length ? state.settings.adStatuses : [];
-}
-
-function getAdStatusName(item) {
-  return typeof item === 'string' ? item : item?.name || '';
-}
-
-function getAdStatusColor(item) {
-  if (typeof item === 'object' && isHexColor(item?.color)) return item.color;
-  return '#388bfd';
-}
-
-function renderAdStatuses() {
-  const list = document.querySelector('[data-ad-status-list]');
-  const adStatuses = getAdStatuses();
-  list.innerHTML = adStatuses.length ? adStatuses.map((item, index) => {
-    const name = getAdStatusName(item);
-    const color = getAdStatusColor(item);
-    return `
-      <div class="settings-row">
-        ${statusBadge(name, color)}
-        <div class="row-actions">
-          <button class="btn btn-secondary btn-sm" type="button" data-edit-ad-status="${index}">Editar</button>
-          <button class="btn btn-danger btn-sm" type="button" data-delete-ad-status="${index}">Sacar</button>
-        </div>
-      </div>
-    `;
-  }).join('') : '<div class="empty-state">Sin tags de publicidad configurados</div>';
-
-  document.querySelectorAll('[data-edit-ad-status]').forEach((button) => {
-    button.addEventListener('click', () => openAdStatusModal(Number(button.dataset.editAdStatus)));
-  });
-  document.querySelectorAll('[data-delete-ad-status]').forEach((button) => {
-    button.addEventListener('click', () => deleteAdStatus(Number(button.dataset.deleteAdStatus), button));
-  });
-}
-
-function openAdStatusModal(index = null) {
-  const isEdit = index !== null;
-  const current = isEdit ? getAdStatuses()[index] : null;
-  const currentName = current ? getAdStatusName(current) : '';
-  const currentColor = current ? getAdStatusColor(current) : '#388bfd';
-  let isSubmitting = false;
-  const overlay = openModal(`
-    <div class="modal-overlay">
-      <form class="modal">
-        <div class="modal-header">${isEdit ? 'Editar Tag de Publicidad' : 'Agregar Tag de Publicidad'}</div>
-        <div class="form-group">
-          <label>Nombre del tag</label>
-          <input type="text" id="ad-status-name-input" class="form-control" value="${escapeHtml(currentName)}" placeholder="Ej. SI">
-        </div>
-        <div class="form-group">
-          <label>Color</label>
-          <div class="color-picker-row">
-            <input type="color" id="ad-status-color-input" value="${escapeHtml(currentColor)}" aria-label="Color del tag">
-            <input type="text" id="ad-status-color-text-input" class="form-control" value="${escapeHtml(currentColor)}" aria-label="Codigo de color">
-          </div>
-          <div class="color-swatches">
-            ${['#3fb950', '#d29922', '#f85149', '#8b949e', '#388bfd', '#a371f7'].map((color) => `
-              <button class="color-swatch" type="button" data-ad-status-color="${color}" style="background-color: ${color};" aria-label="${color}"></button>
-            `).join('')}
-          </div>
-          <div class="status-preview" data-ad-status-preview>${statusBadge(currentName || 'Publicidad', currentColor)}</div>
-        </div>
-        <div class="modal-actions">
-          <button class="btn btn-secondary" type="button" data-close-modal>Cancelar</button>
-          <button class="btn" type="submit">${isEdit ? 'Guardar Cambios' : 'Agregar'}</button>
-        </div>
-      </form>
-    </div>
-  `);
-
-  const nameInput = overlay.querySelector('#ad-status-name-input');
-  const colorInput = overlay.querySelector('#ad-status-color-input');
-  const colorTextInput = overlay.querySelector('#ad-status-color-text-input');
-  const preview = overlay.querySelector('[data-ad-status-preview]');
-
-  function syncPreview() {
-    const color = isHexColor(colorTextInput.value) ? colorTextInput.value : colorInput.value;
-    colorInput.value = color;
-    preview.innerHTML = statusBadge(nameInput.value.trim() || 'Publicidad', color);
-  }
-
-  nameInput.addEventListener('input', syncPreview);
-  colorInput.addEventListener('input', () => {
-    colorTextInput.value = colorInput.value;
-    syncPreview();
-  });
-  colorTextInput.addEventListener('input', syncPreview);
-  overlay.querySelectorAll('[data-ad-status-color]').forEach((button) => {
-    button.addEventListener('click', () => {
-      colorInput.value = button.dataset.adStatusColor;
-      colorTextInput.value = button.dataset.adStatusColor;
-      syncPreview();
-    });
-  });
-
-  overlay.querySelector('form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    if (isSubmitting) return;
-    const status = nameInput.value.trim();
-    const color = isHexColor(colorTextInput.value) ? colorTextInput.value : colorInput.value;
-    if (!status) return;
-    const submitButton = event.currentTarget.querySelector('button[type="submit"]');
-    isSubmitting = true;
-    setButtonLoading(submitButton, true, 'Guardando...');
-    try {
-      await api(isEdit ? `/api/settings/ad-statuses/${index}` : '/api/settings/ad-statuses', {
-        method: isEdit ? 'PATCH' : 'POST',
-        body: JSON.stringify({ status, color, userId: currentUser.id, userName: currentUser.name })
-      });
-      closeModal();
-      await refresh();
-    } catch (error) {
-      isSubmitting = false;
-      setButtonLoading(submitButton, false);
-      alert(error.message);
-    }
-  });
-}
-
-async function deleteAdStatus(index, button) {
-  if (isDeletingAdStatus) return;
-  const name = getAdStatusName(getAdStatuses()[index]);
-  if (!name || !confirm(`Seguro que queres sacar el tag de publicidad "${name}"?`)) return;
-  isDeletingAdStatus = true;
-  setButtonLoading(button, true, 'Sacando...');
-  try {
-    await api(`/api/settings/ad-statuses/${index}`, {
-      method: 'DELETE',
-      body: JSON.stringify({ userId: currentUser.id, userName: currentUser.name })
-    });
-    await refresh();
-  } catch (error) {
-    setButtonLoading(button, false);
-    alert(error.message);
-  } finally {
-    isDeletingAdStatus = false;
-  }
 }
 
 // --- Consultors ---

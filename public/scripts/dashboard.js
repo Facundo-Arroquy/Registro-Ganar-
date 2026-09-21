@@ -299,6 +299,7 @@ function openClientModal(client = null) {
       company: overlay.querySelector('#client-company-input').value.trim(),
       email: overlay.querySelector('#client-email-input').value.trim(),
       ownerId: overlay.querySelector('#client-owner-input').value,
+      consultor: overlay.querySelector('#client-consultor-input').value,
       status: overlay.querySelector('#client-status-input').value,
       complexity: overlay.querySelector('#client-complexity-input').value,
       adStatus: overlay.querySelector('#client-ad-status-input').value,
@@ -370,6 +371,23 @@ function complexityOptions(selected) {
     const name = typeof item === 'string' ? item : item?.name || '';
     return `<option value="${escapeHtml(name)}" ${name === selected ? 'selected' : ''}>${escapeHtml(name)}</option>`;
   }).join('');
+}
+
+function getClientConsultors() {
+  return state.settings?.clientConsultors?.length ? state.settings.clientConsultors : [];
+}
+
+function consultorOptions(selected) {
+  return `<option value="">Sin asignar</option>${getClientConsultors().map((item) => {
+    const name = typeof item === 'string' ? item : item?.name || '';
+    return `<option value="${escapeHtml(name)}" ${name === selected ? 'selected' : ''}>${escapeHtml(name)}</option>`;
+  }).join('')}`;
+}
+
+function consultorBadge(name) {
+  const item = getClientConsultors().find((entry) => (typeof entry === 'string' ? entry : entry?.name) === name);
+  const color = item && typeof item === 'object' && isHexColor(item.color) ? item.color : '#388bfd';
+  return `<span class="status-badge custom-status" style="--status-color: ${escapeHtml(color)};">${escapeHtml(name)}</span>`;
 }
 
 function getClientStatuses() {
