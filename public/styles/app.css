@@ -908,6 +908,7 @@ header {
   pointer-events: none;
   transition: opacity 0.2s;
   padding: 20px;
+  overflow-y: auto;
 }
 
 .modal-overlay.active {
@@ -920,6 +921,10 @@ header {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
   width: min(480px, 100%);
+  max-height: calc(100vh - 40px);
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 24px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
 }
