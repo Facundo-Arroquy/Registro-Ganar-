@@ -67,6 +67,7 @@ function renderDashboard() {
       <td>${renderEmails(client.email)}</td>
       <td>${links.length ? links.map((link) => `<a href="${escapeHtml(link.url)}" target="_blank" rel="noopener" class="client-link" data-stop-row-click>${escapeHtml(link.label)}</a>`).join(' ') : '<span style="color: var(--text-muted);">-</span>'}</td>
       <td>${owner ? escapeHtml(owner.name) : '<span style="color: var(--text-muted);">Sin asignar</span>'}</td>
+      <td>${client.consultor ? consultorBadge(client.consultor) : '<span style="color: var(--text-muted);">-</span>'}</td>
       <td>${statusBadge(client.status || 'Activo')}</td>
       <td>${client.complexity ? complexityBadge(client.complexity) : '<span style="color: var(--text-muted);">-</span>'}</td>
       <td>${client.adStatus ? adStatusBadge(client.adStatus) : '<span style="color: var(--text-muted);">-</span>'}</td>
@@ -119,6 +120,7 @@ function getSortValue(row, column) {
     case 'email': return (row.client.email || '').toLowerCase();
     case 'links': return row.links.length;
     case 'owner': return (row.owner?.name || '').toLowerCase();
+    case 'consultor': return (row.client.consultor || '').toLowerCase();
     case 'status': return (row.client.status || 'Activo').toLowerCase();
     case 'complexity': return (row.client.complexity || '').toLowerCase();
     case 'adStatus': return (row.client.adStatus || '').toLowerCase();
@@ -173,6 +175,12 @@ function openClientModal(client = null) {
         <div class="form-group"><label>Empresa</label><input type="text" id="client-company-input" class="form-control" placeholder="Ej. TechCorp" value="${escapeHtml(client?.company || '')}"></div>
         <div class="form-group"><label>Correos Electronicos <span style="color: var(--text-muted); font-weight: 400;">(uno por linea)</span></label><textarea id="client-email-input" class="form-control" rows="2" placeholder="cliente@techcorp.com&#10;otro@empresa.com">${escapeHtml(client?.email || '')}</textarea></div>
         <div class="form-group"><label>Personal a cargo</label><select id="client-owner-input" class="form-control">${userOptions(client?.ownerId || '')}</select></div>
+        <div class="form-group">
+          <label>Consultor</label>
+          <select id="client-consultor-input" class="form-control">
+            ${consultorOptions(client?.consultor || '')}
+          </select>
+        </div>
         <div class="form-group">
           <label>Estado del cliente</label>
           <select id="client-status-input" class="form-control">
@@ -291,6 +299,7 @@ function openClientModal(client = null) {
       company: overlay.querySelector('#client-company-input').value.trim(),
       email: overlay.querySelector('#client-email-input').value.trim(),
       ownerId: overlay.querySelector('#client-owner-input').value,
+      consultor: overlay.querySelector('#client-consultor-input').value,
       status: overlay.querySelector('#client-status-input').value,
       complexity: overlay.querySelector('#client-complexity-input').value,
       adStatus: overlay.querySelector('#client-ad-status-input').value,
@@ -362,6 +371,23 @@ function complexityOptions(selected) {
     const name = typeof item === 'string' ? item : item?.name || '';
     return `<option value="${escapeHtml(name)}" ${name === selected ? 'selected' : ''}>${escapeHtml(name)}</option>`;
   }).join('');
+}
+
+function getClientConsultors() {
+  return state.settings?.clientConsultors?.length ? state.settings.clientConsultors : [];
+}
+
+function consultorOptions(selected) {
+  return `<option value="">Sin asignar</option>${getClientConsultors().map((item) => {
+    const name = typeof item === 'string' ? item : item?.name || '';
+    return `<option value="${escapeHtml(name)}" ${name === selected ? 'selected' : ''}>${escapeHtml(name)}</option>`;
+  }).join('')}`;
+}
+
+function consultorBadge(name) {
+  const item = getClientConsultors().find((entry) => (typeof entry === 'string' ? entry : entry?.name) === name);
+  const color = item && typeof item === 'object' && isHexColor(item.color) ? item.color : '#388bfd';
+  return `<span class="status-badge custom-status" style="--status-color: ${escapeHtml(color)};">${escapeHtml(name)}</span>`;
 }
 
 function getClientStatuses() {

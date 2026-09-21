@@ -83,6 +83,7 @@ aside {
   display: flex;
   flex-direction: column;
   padding: 20px;
+  overflow: hidden;
 }
 
 .logo {
@@ -130,10 +131,14 @@ aside {
 .user-list {
   list-style: none;
   margin-bottom: 20px;
+  max-height: 80px;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .board-item,
 .user-item {
+  height: 38px;
   padding: 8px 12px;
   border-radius: var(--radius-sm);
   cursor: pointer;
@@ -599,6 +604,23 @@ header {
   border: 1px solid rgba(56, 139, 253, 0.2);
 }
 
+.meeting-badge {
+  background-color: rgba(163, 113, 247, 0.1);
+  color: #c9a7ff;
+  border: 1px solid rgba(163, 113, 247, 0.25);
+  border-radius: 10px;
+  display: inline-flex;
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+.meeting-fields {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .status-badge {
   display: inline-flex;
   align-items: center;
@@ -886,6 +908,7 @@ header {
   pointer-events: none;
   transition: opacity 0.2s;
   padding: 20px;
+  overflow-y: auto;
 }
 
 .modal-overlay.active {
@@ -898,6 +921,10 @@ header {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
   width: min(480px, 100%);
+  max-height: calc(100vh - 40px);
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 24px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
 }
@@ -1189,6 +1216,10 @@ header {
     padding: 20px;
     max-height: calc(100vh - 40px);
     overflow-y: auto;
+  }
+
+  .meeting-fields {
+    grid-template-columns: 1fr;
   }
 }
 

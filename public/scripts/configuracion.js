@@ -6,8 +6,10 @@ import { escapeHtml, setButtonLoading } from './utils.js';
 const currentUser = requireSession();
 let state;
 let isDeletingStatus = false;
-let isDeletingComplexity = false;
 let isDeletingAdStatus = false;
+let isDeletingConsultor = false;
+let isDeletingComplexity = false;
+
 
 async function boot() {
   state = await loadAppState();
@@ -27,11 +29,13 @@ function renderPage() {
     onRefresh: refresh
   });
   document.querySelector('[data-add-status]').onclick = () => openStatusModal();
+  document.querySelector('[data-add-consultor]').onclick = () => openConsultorModal();
   document.querySelector('[data-add-complexity]').onclick = () => openComplexityModal();
   document.querySelector('[data-add-ad-status]').onclick = () => openAdStatusModal();
   renderStatuses();
   renderComplexities();
   renderAdStatuses();
+  renderConsultors();
   renderHistory();
 }
 
@@ -503,6 +507,152 @@ function formatDateTime(value) {
     dateStyle: 'short',
     timeStyle: 'short'
   }).format(new Date(value));
+}
+
+// --- Consultors ---
+
+function getClientConsultors() {
+  return state.settings?.clientConsultors?.length ? state.settings.clientConsultors : [];
+}
+
+function getConsultorName(consultor) {
+  return typeof consultor === 'string' ? consultor : consultor?.name || '';
+}
+
+function getConsultorColor(consultor) {
+  if (typeof consultor === 'object' && isHexColor(consultor?.color)) return consultor.color;
+  return '#388bfd';
+}
+
+function renderConsultors() {
+  const list = document.querySelector('[data-consultor-list]');
+  const consultors = getClientConsultors();
+  list.innerHTML = consultors.length ? consultors.map((consultorItem, index) => {
+    const name = getConsultorName(consultorItem);
+    const color = getConsultorColor(consultorItem);
+    return `
+    <div class="settings-row">
+      ${statusBadge(name, color)}
+      <div class="row-actions">
+        <button class="btn btn-secondary btn-sm" type="button" data-edit-consultor="${index}">Editar</button>
+        <button class="btn btn-danger btn-sm" type="button" data-delete-consultor="${index}">Sacar</button>
+      </div>
+    </div>
+  `;
+  }).join('') : '<div class="empty-state">Sin consultores configurados</div>';
+
+  document.querySelectorAll('[data-edit-consultor]').forEach((button) => {
+    button.addEventListener('click', () => openConsultorModal(Number(button.dataset.editConsultor)));
+  });
+  document.querySelectorAll('[data-delete-consultor]').forEach((button) => {
+    button.addEventListener('click', () => deleteConsultor(Number(button.dataset.deleteConsultor), button));
+  });
+}
+
+function openConsultorModal(index = null) {
+  const isEdit = index !== null;
+  const current = isEdit ? getClientConsultors()[index] : null;
+  const currentName = current ? getConsultorName(current) : '';
+  const currentColor = current ? getConsultorColor(current) : '#388bfd';
+  let isSubmitting = false;
+  const overlay = openModal(`
+    <div class="modal-overlay">
+      <form class="modal">
+        <div class="modal-header">${isEdit ? 'Editar Consultor' : 'Agregar Consultor'}</div>
+        <div class="form-group">
+          <label>Nombre del consultor</label>
+          <input type="text" id="consultor-name-input" class="form-control" value="${escapeHtml(currentName)}" placeholder="Ej. Interno">
+        </div>
+        <div class="form-group">
+          <label>Color</label>
+          <div class="color-picker-row">
+            <input type="color" id="consultor-color-input" value="${escapeHtml(currentColor)}" aria-label="Color del consultor">
+            <input type="text" id="consultor-color-text-input" class="form-control" value="${escapeHtml(currentColor)}" aria-label="Codigo de color">
+          </div>
+          <div class="color-swatches">
+            ${['#3fb950', '#d29922', '#f85149', '#8b949e', '#388bfd', '#a371f7'].map((color) => `
+              <button class="color-swatch" type="button" data-consultor-color="${color}" style="background-color: ${color};" aria-label="${color}"></button>
+            `).join('')}
+          </div>
+          <div class="status-preview" data-consultor-preview>${statusBadge(currentName || 'Consultor', currentColor)}</div>
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-secondary" type="button" data-close-modal>Cancelar</button>
+          <button class="btn" type="submit">${isEdit ? 'Guardar Cambios' : 'Agregar'}</button>
+        </div>
+      </form>
+    </div>
+  `);
+
+  const nameInput = overlay.querySelector('#consultor-name-input');
+  const colorInput = overlay.querySelector('#consultor-color-input');
+  const colorTextInput = overlay.querySelector('#consultor-color-text-input');
+  const preview = overlay.querySelector('[data-consultor-preview]');
+
+  function syncPreview() {
+    const color = isHexColor(colorTextInput.value) ? colorTextInput.value : colorInput.value;
+    colorInput.value = color;
+    preview.innerHTML = statusBadge(nameInput.value.trim() || 'Consultor', color);
+  }
+
+  nameInput.addEventListener('input', syncPreview);
+  colorInput.addEventListener('input', () => {
+    colorTextInput.value = colorInput.value;
+    syncPreview();
+  });
+  colorTextInput.addEventListener('input', syncPreview);
+  overlay.querySelectorAll('[data-consultor-color]').forEach((button) => {
+    button.addEventListener('click', () => {
+      colorInput.value = button.dataset.consultorColor;
+      colorTextInput.value = button.dataset.consultorColor;
+      syncPreview();
+    });
+  });
+
+  overlay.querySelector('form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (isSubmitting) return;
+    const status = nameInput.value.trim();
+    const color = isHexColor(colorTextInput.value) ? colorTextInput.value : colorInput.value;
+    if (!status) return;
+    const form = event.currentTarget;
+    const submitButton = form.querySelector('button[type="submit"]');
+    isSubmitting = true;
+    setButtonLoading(submitButton, true, 'Guardando...');
+
+    try {
+      await api(isEdit ? `/api/settings/client-consultors/${index}` : '/api/settings/client-consultors', {
+        method: isEdit ? 'PATCH' : 'POST',
+        body: JSON.stringify({ status, color, userId: currentUser.id, userName: currentUser.name })
+      });
+      closeModal();
+      await refresh();
+    } catch (error) {
+      isSubmitting = false;
+      setButtonLoading(submitButton, false);
+      alert(error.message);
+    }
+  });
+}
+
+async function deleteConsultor(index, button) {
+  if (isDeletingConsultor) return;
+  const name = getConsultorName(getClientConsultors()[index]);
+  if (!name || !confirm(`Seguro que queres sacar el consultor "${name}"?`)) return;
+  isDeletingConsultor = true;
+  setButtonLoading(button, true, 'Sacando...');
+  try {
+    await api(`/api/settings/client-consultors/${index}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ userId: currentUser.id, userName: currentUser.name })
+    });
+    await refresh();
+  } catch (error) {
+    setButtonLoading(button, false);
+    alert(error.message);
+  } finally {
+    isDeletingConsultor = false;
+  }
 }
 
 boot();

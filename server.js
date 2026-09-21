@@ -8,8 +8,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, 'public');
 const port = Number(process.env.PORT || 3000);
 let statusWriteQueue = Promise.resolve();
-let complexityWriteQueue = Promise.resolve();
 let adStatusWriteQueue = Promise.resolve();
+let consultorWriteQueue = Promise.resolve();
+let complexityWriteQueue = Promise.resolve();
+
 let supportsStatusColor = true;
 let supportsComplexityColor = true;
 let supportsAdStatusColor = true;
@@ -131,13 +133,14 @@ async function supabaseRest(pathname, options = {}) {
 }
 
 async function getSupabaseState() {
-  const [users, statuses, complexities, adStatuses, auditRows, clients, boards, columns, cards, clientLinks, generalLinks] = await Promise.all([
+  const [users, statuses, consultors, complexities, adStatuses, auditRows, clients, boards, columns, cards, clientLinks, generalLinks] = await Promise.all([
     supabaseRest('/app_users?select=id,email,name&order=name.asc'),
     getSupabaseStatuses(),
+    getSupabaseConsultors(),
     getSupabaseComplexities(),
     getSupabaseAdStatuses(),
     supabaseRest('/settings_audit?select=action,user_id,user_name,created_at&order=created_at.desc&limit=50'),
-    supabaseRest('/clients?select=id,name,company,email,owner_id,status_id,complexity_id,ad_status_id,meli_user,meeting_day,meeting_time,meeting_frequency'),
+    supabaseRest('/clients?select=id,name,company,email,owner_id,status_id,consultor_id,complexity_id,ad_status_id,meli_user,meeting_day,meeting_time,meeting_frequency'),
     supabaseRest('/boards?select=id,name,color,position&order=position.asc'),
     supabaseRest('/board_columns?select=id,board_id,name,show_timer,position&order=position.asc'),
     supabaseRest('/cards?select=id,board_id,column_id,client_id,title,description,due_date,created_by,assigned_to,entered_column_at'),
@@ -145,8 +148,9 @@ async function getSupabaseState() {
     supabaseRest('/general_links?select=id,url,label&order=created_at.asc')
   ]);
   const statusMap = new Map(statuses.map((status) => [status.id, status]));
-  const complexityMap = new Map(complexities.map((c) => [c.id, c]));
-  const adStatusMap = new Map(adStatuses.map((a) => [a.id, a]));
+  const consultorMap = new Map(consultors.map((c) => [c.id, c]));
+  const complexityMap = new Map(complexities.map((item) => [item.id, item]));
+  const adStatusMap = new Map(adStatuses.map((item) => [item.id, item]));
   return {
     users: users.map(publicUser),
     clients: clients.map((client) => ({
@@ -156,6 +160,7 @@ async function getSupabaseState() {
       email: client.email || '',
       ownerId: client.owner_id || '',
       status: statusMap.get(client.status_id)?.name || 'Activo',
+      consultor: consultorMap.get(client.consultor_id)?.name || '',
       complexity: complexityMap.get(client.complexity_id)?.name || '',
       adStatus: adStatusMap.get(client.ad_status_id)?.name || '',
       meliUser: client.meli_user || '',
@@ -191,6 +196,7 @@ async function getSupabaseState() {
     })),
     settings: {
       clientStatuses: statuses.map((status) => normalizeStatus({ name: status.name, color: status.color })),
+      clientConsultors: consultors.map((item) => ({ name: item.name, color: item.color })),
       complexities: complexities.map((c) => normalizeComplexity({ name: c.name, color: c.color })),
       adStatuses: adStatuses.map((a) => normalizeAdStatus({ name: a.name, color: a.color })),
       lastConfigChange: auditRows[0] ? mapAuditRow(auditRows[0]) : null,
@@ -220,6 +226,21 @@ async function getNextBoardPosition() {
 async function getNextStatusPosition() {
   const statuses = await supabaseRest('/client_statuses?select=position&order=position.desc&limit=1');
   return (statuses[0]?.position || 0) + 1;
+}
+
+async function getSupabaseConsultors() {
+  return await supabaseRest('/client_consultors?select=id,name,position,color&order=position.asc');
+}
+
+async function getNextConsultorPosition() {
+  const consultors = await supabaseRest('/client_consultors?select=position&order=position.desc&limit=1');
+  return (consultors[0]?.position || 0) + 1;
+}
+
+async function getConsultorIdByName(consultorName) {
+  if (!consultorName) return null;
+  const consultors = await supabaseRest(`/client_consultors?select=id,name&name=eq.${encodeURIComponent(consultorName)}&limit=1`);
+  return consultors[0]?.id || null;
 }
 
 async function getSupabaseStatuses() {
@@ -364,14 +385,16 @@ function mapAuditRow(row) {
 }
 
 async function getSupabaseSettings() {
-  const [statuses, complexities, adStatuses, auditRows] = await Promise.all([
+  const [statuses, consultors, complexities, adStatuses, auditRows] = await Promise.all([
     getSupabaseStatuses(),
+    getSupabaseConsultors(),
     getSupabaseComplexities(),
     getSupabaseAdStatuses(),
     supabaseRest('/settings_audit?select=action,user_id,user_name,created_at&order=created_at.desc&limit=50')
   ]);
   return {
     clientStatuses: statuses.map((status) => normalizeStatus({ name: status.name, color: status.color })),
+    clientConsultors: consultors.map((item) => ({ name: item.name, color: item.color })),
     complexities: complexities.map((c) => normalizeComplexity({ name: c.name, color: c.color })),
     adStatuses: adStatuses.map((a) => normalizeAdStatus({ name: a.name, color: a.color })),
     lastConfigChange: auditRows[0] ? mapAuditRow(auditRows[0]) : null,
@@ -380,7 +403,7 @@ async function getSupabaseSettings() {
 }
 
 async function getSupabaseClient(clientId) {
-  const [client] = await supabaseRest(`/clients?select=id,name,company,email,owner_id,meeting_day,meeting_time,meeting_frequency,complexity_id,ad_status_id,meli_user,status:client_statuses(name),complexity:complexities(name),ad_status:ad_statuses(name)&id=eq.${encodeURIComponent(clientId)}&limit=1`);
+  const [client] = await supabaseRest(`/clients?select=id,name,company,email,owner_id,meeting_day,meeting_time,meeting_frequency,complexity_id,ad_status_id,meli_user,status:client_statuses(name),consultor:client_consultors(name),complexity:complexities(name),ad_status:ad_statuses(name)&id=eq.${encodeURIComponent(clientId)}&limit=1`);
   if (!client) return null;
   return {
     id: client.id,
@@ -389,6 +412,7 @@ async function getSupabaseClient(clientId) {
     email: client.email || '',
     ownerId: client.owner_id || '',
     status: client.status?.name || 'Activo',
+    consultor: client.consultor?.name || '',
     complexity: client.complexity?.name || '',
     adStatus: client.ad_status?.name || '',
     meliUser: client.meli_user || '',
@@ -565,6 +589,12 @@ function parseMeetingFrequency(value) {
 async function enqueueStatusWrite(operation) {
   const result = statusWriteQueue.then(operation, operation);
   statusWriteQueue = result.catch(() => {});
+  return result;
+}
+
+async function enqueueConsultorWrite(operation) {
+  const result = consultorWriteQueue.then(operation, operation);
+  consultorWriteQueue = result.catch(() => {});
   return result;
 }
 
@@ -758,6 +788,66 @@ async function handleApi(req, res, url) {
     }
   }
 
+  if (req.method === 'POST' && url.pathname === '/api/settings/client-consultors') {
+    return enqueueConsultorWrite(async () => {
+      const name = String(body.status || '').trim();
+      const color = isHexColor(body.color) ? String(body.color) : '#388bfd';
+      if (!name) return sendError(res, 400, 'El consultor es obligatorio');
+      const consultors = await getSupabaseConsultors();
+      if (consultors.some((item) => item.name.toLowerCase() === name.toLowerCase())) {
+        return sendError(res, 400, 'Ese consultor ya existe');
+      }
+      await supabaseRest('/client_consultors', {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify([{ name, color, position: await getNextConsultorPosition() }])
+      });
+      await tryRecordSupabaseAudit(body, `Agrego el consultor "${name}"`);
+      return sendJson(res, 201, { settings: await getSupabaseSettings() });
+    });
+  }
+
+  if (segments[0] === 'api' && segments[1] === 'settings' && segments[2] === 'client-consultors' && segments[3]) {
+    const index = Number(segments[3]);
+    if (!Number.isInteger(index) || index < 0) return sendError(res, 404, 'Consultor no encontrado');
+
+    if (req.method === 'PATCH') {
+      return enqueueConsultorWrite(async () => {
+        const consultors = await getSupabaseConsultors();
+        const row = consultors[index];
+        if (!row) return sendError(res, 404, 'Consultor no encontrado');
+        const nextName = String(body.status || '').trim();
+        const nextColor = isHexColor(body.color) ? String(body.color) : row.color;
+        if (!nextName) return sendError(res, 400, 'El consultor es obligatorio');
+        const duplicate = consultors.some((item, itemIndex) => itemIndex !== index && item.name.toLowerCase() === nextName.toLowerCase());
+        if (duplicate) return sendError(res, 400, 'Ese consultor ya existe');
+        await supabaseRest(`/client_consultors?id=eq.${encodeURIComponent(row.id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ name: nextName, color: nextColor })
+        });
+        await tryRecordSupabaseAudit(body, `Edito el consultor "${row.name}" a "${nextName}"`);
+        return sendJson(res, 200, { settings: await getSupabaseSettings() });
+      });
+    }
+
+    if (req.method === 'DELETE') {
+      return enqueueConsultorWrite(async () => {
+        const consultors = await getSupabaseConsultors();
+        const row = consultors[index];
+        if (!row) return sendError(res, 404, 'Consultor no encontrado');
+        if (consultors.length <= 1) return sendError(res, 400, 'Debe conservarse al menos un consultor');
+        const fallback = consultors.find((item) => item.id !== row.id);
+        await supabaseRest(`/clients?consultor_id=eq.${encodeURIComponent(row.id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ consultor_id: fallback.id })
+        });
+        await supabaseRest(`/client_consultors?id=eq.${encodeURIComponent(row.id)}`, { method: 'DELETE' });
+        await tryRecordSupabaseAudit(body, `Saco el consultor "${row.name}"`);
+        return sendJson(res, 200, { settings: await getSupabaseSettings() });
+      });
+    }
+  }
+
   if (req.method === 'POST' && url.pathname === '/api/settings/ad-statuses') {
     return enqueueAdStatusWrite(async () => {
       const name = String(body.status || '').trim();
@@ -861,6 +951,7 @@ async function handleApi(req, res, url) {
       email: String(body.email || '').trim(),
       ownerId: String(body.ownerId || ''),
       status: String(body.status || 'Activo').trim(),
+      consultor: String(body.consultor || '').trim(),
       complexity: String(body.complexity || '').trim(),
       adStatus: String(body.adStatus || '').trim(),
       meliUser: String(body.meliUser || '').trim(),
@@ -869,9 +960,12 @@ async function handleApi(req, res, url) {
       meetingFrequency: parseMeetingFrequency(body.meetingFrequency)
     };
     if (!client.name || !client.company) return sendError(res, 400, 'Nombre y empresa son obligatorios');
-    const statusId = await getStatusIdByName(client.status);
-    const complexityId = client.complexity ? await getComplexityIdByName(client.complexity) : null;
-    const adStatusId = client.adStatus ? await getAdStatusIdByName(client.adStatus) : null;
+    const [statusId, consultorId, complexityId, adStatusId] = await Promise.all([
+      getStatusIdByName(client.status),
+      getConsultorIdByName(client.consultor),
+      getComplexityIdByName(client.complexity),
+      getAdStatusIdByName(client.adStatus)
+    ]);
     const [createdClient] = await supabaseRest('/clients', {
       method: 'POST',
       headers: { Prefer: 'return=representation' },
@@ -882,6 +976,7 @@ async function handleApi(req, res, url) {
         email: client.email || null,
         owner_id: client.ownerId || null,
         status_id: statusId,
+        consultor_id: consultorId,
         complexity_id: complexityId,
         ad_status_id: adStatusId,
         meli_user: client.meliUser || null,
@@ -906,6 +1001,7 @@ async function handleApi(req, res, url) {
         email: body.email === undefined ? client.email : String(body.email).trim(),
         ownerId: body.ownerId === undefined ? client.ownerId || '' : String(body.ownerId),
         status: body.status === undefined ? client.status || 'Activo' : String(body.status || 'Activo').trim(),
+        consultor: body.consultor === undefined ? client.consultor || '' : String(body.consultor || '').trim(),
         complexity: body.complexity === undefined ? client.complexity || '' : String(body.complexity || '').trim(),
         adStatus: body.adStatus === undefined ? client.adStatus || '' : String(body.adStatus || '').trim(),
         meliUser: body.meliUser === undefined ? client.meliUser || '' : String(body.meliUser || '').trim(),
@@ -914,9 +1010,12 @@ async function handleApi(req, res, url) {
         meetingFrequency: body.meetingFrequency === undefined ? client.meetingFrequency : parseMeetingFrequency(body.meetingFrequency)
       };
       if (!payload.name || !payload.company) return sendError(res, 400, 'Nombre y empresa son obligatorios');
-      const statusId = await getStatusIdByName(payload.status);
-      const complexityId = payload.complexity ? await getComplexityIdByName(payload.complexity) : null;
-      const adStatusId = payload.adStatus ? await getAdStatusIdByName(payload.adStatus) : null;
+      const [statusId, consultorId, complexityId, adStatusId] = await Promise.all([
+        getStatusIdByName(payload.status),
+        getConsultorIdByName(payload.consultor),
+        getComplexityIdByName(payload.complexity),
+        getAdStatusIdByName(payload.adStatus)
+      ]);
       await supabaseRest(`/clients?id=eq.${encodeURIComponent(client.id)}`, {
         method: 'PATCH',
         headers: { Prefer: 'return=representation' },
@@ -926,6 +1025,7 @@ async function handleApi(req, res, url) {
           email: payload.email || null,
           owner_id: payload.ownerId || null,
           status_id: statusId,
+          consultor_id: consultorId,
           complexity_id: complexityId,
           ad_status_id: adStatusId,
           meli_user: payload.meliUser || null,
