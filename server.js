@@ -8,6 +8,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, 'public');
 const port = Number(process.env.PORT || 3000);
 let statusWriteQueue = Promise.resolve();
+let adStatusWriteQueue = Promise.resolve();
+let consultorWriteQueue = Promise.resolve();
 let supportsStatusColor = true;
 
 const contentTypes = {
@@ -127,11 +129,14 @@ async function supabaseRest(pathname, options = {}) {
 }
 
 async function getSupabaseState() {
-  const [users, statuses, auditRows, clients, boards, columns, cards, clientLinks, generalLinks] = await Promise.all([
+  const [users, statuses, consultors, complexities, adStatuses, auditRows, clients, boards, columns, cards, clientLinks, generalLinks] = await Promise.all([
     supabaseRest('/app_users?select=id,email,name&order=name.asc'),
     getSupabaseStatuses(),
+    getSupabaseConsultors(),
+    getSupabaseComplexities(),
+    getSupabaseAdStatuses(),
     supabaseRest('/settings_audit?select=action,user_id,user_name,created_at&order=created_at.desc&limit=50'),
-    supabaseRest('/clients?select=id,name,company,email,owner_id,status_id'),
+    supabaseRest('/clients?select=id,name,company,email,owner_id,status_id,consultor_id,complexity_id,ad_status_id,meli_user,meeting_day,meeting_time,meeting_frequency'),
     supabaseRest('/boards?select=id,name,color,position&order=position.asc'),
     supabaseRest('/board_columns?select=id,board_id,name,show_timer,position&order=position.asc'),
     supabaseRest('/cards?select=id,board_id,column_id,client_id,title,description,due_date,created_by,assigned_to,entered_column_at'),
@@ -139,6 +144,9 @@ async function getSupabaseState() {
     supabaseRest('/general_links?select=id,url,label&order=created_at.asc')
   ]);
   const statusMap = new Map(statuses.map((status) => [status.id, status]));
+  const consultorMap = new Map(consultors.map((c) => [c.id, c]));
+  const complexityMap = new Map(complexities.map((item) => [item.id, item]));
+  const adStatusMap = new Map(adStatuses.map((item) => [item.id, item]));
   return {
     users: users.map(publicUser),
     clients: clients.map((client) => ({
@@ -148,6 +156,13 @@ async function getSupabaseState() {
       email: client.email || '',
       ownerId: client.owner_id || '',
       status: statusMap.get(client.status_id)?.name || 'Activo',
+      consultor: consultorMap.get(client.consultor_id)?.name || '',
+      complexity: complexityMap.get(client.complexity_id)?.name || '',
+      adStatus: adStatusMap.get(client.ad_status_id)?.name || '',
+      meliUser: client.meli_user || '',
+      meetingDay: client.meeting_day ?? null,
+      meetingTime: client.meeting_time || '',
+      meetingFrequency: client.meeting_frequency ?? null,
       links: clientLinks.filter((link) => link.client_id === client.id).map((link) => ({
         id: link.id,
         url: link.url,
@@ -177,6 +192,9 @@ async function getSupabaseState() {
     })),
     settings: {
       clientStatuses: statuses.map((status) => normalizeStatus({ name: status.name, color: status.color })),
+      clientConsultors: consultors.map((c) => ({ name: c.name, color: c.color })),
+      complexities: complexities.map((item) => ({ name: item.name, color: item.color })),
+      adStatuses: adStatuses.map((item) => ({ name: item.name, color: item.color })),
       lastConfigChange: auditRows[0] ? mapAuditRow(auditRows[0]) : null,
       configChanges: auditRows.map(mapAuditRow)
     },
@@ -204,6 +222,46 @@ async function getNextBoardPosition() {
 async function getNextStatusPosition() {
   const statuses = await supabaseRest('/client_statuses?select=position&order=position.desc&limit=1');
   return (statuses[0]?.position || 0) + 1;
+}
+
+async function getSupabaseConsultors() {
+  return await supabaseRest('/client_consultors?select=id,name,position,color&order=position.asc');
+}
+
+async function getNextConsultorPosition() {
+  const consultors = await supabaseRest('/client_consultors?select=position&order=position.desc&limit=1');
+  return (consultors[0]?.position || 0) + 1;
+}
+
+async function getConsultorIdByName(consultorName) {
+  if (!consultorName) return null;
+  const consultors = await supabaseRest(`/client_consultors?select=id,name&name=eq.${encodeURIComponent(consultorName)}&limit=1`);
+  return consultors[0]?.id || null;
+}
+
+async function getSupabaseComplexities() {
+  return supabaseRest('/complexities?select=id,name,position,color&order=position.asc');
+}
+
+async function getComplexityIdByName(name) {
+  if (!name) return null;
+  const rows = await supabaseRest(`/complexities?select=id&name=eq.${encodeURIComponent(name)}&limit=1`);
+  return rows[0]?.id || null;
+}
+
+async function getSupabaseAdStatuses() {
+  return supabaseRest('/ad_statuses?select=id,name,position,color&order=position.asc');
+}
+
+async function getNextAdStatusPosition() {
+  const rows = await supabaseRest('/ad_statuses?select=position&order=position.desc&limit=1');
+  return (rows[0]?.position || 0) + 1;
+}
+
+async function getAdStatusIdByName(name) {
+  if (!name) return null;
+  const rows = await supabaseRest(`/ad_statuses?select=id&name=eq.${encodeURIComponent(name)}&limit=1`);
+  return rows[0]?.id || null;
 }
 
 async function getSupabaseStatuses() {
@@ -258,19 +316,25 @@ function mapAuditRow(row) {
 }
 
 async function getSupabaseSettings() {
-  const [statuses, auditRows] = await Promise.all([
+  const [statuses, consultors, complexities, adStatuses, auditRows] = await Promise.all([
     getSupabaseStatuses(),
+    getSupabaseConsultors(),
+    getSupabaseComplexities(),
+    getSupabaseAdStatuses(),
     supabaseRest('/settings_audit?select=action,user_id,user_name,created_at&order=created_at.desc&limit=50')
   ]);
   return {
     clientStatuses: statuses.map((status) => normalizeStatus({ name: status.name, color: status.color })),
+    clientConsultors: consultors.map((c) => ({ name: c.name, color: c.color })),
+    complexities: complexities.map((item) => ({ name: item.name, color: item.color })),
+    adStatuses: adStatuses.map((item) => ({ name: item.name, color: item.color })),
     lastConfigChange: auditRows[0] ? mapAuditRow(auditRows[0]) : null,
     configChanges: auditRows.map(mapAuditRow)
   };
 }
 
 async function getSupabaseClient(clientId) {
-  const [client] = await supabaseRest(`/clients?select=id,name,company,email,owner_id,status:client_statuses(name)&id=eq.${encodeURIComponent(clientId)}&limit=1`);
+  const [client] = await supabaseRest(`/clients?select=id,name,company,email,owner_id,meli_user,meeting_day,meeting_time,meeting_frequency,status:client_statuses(name),consultor:client_consultors(name),complexity:complexities(name),ad_status:ad_statuses(name)&id=eq.${encodeURIComponent(clientId)}&limit=1`);
   if (!client) return null;
   return {
     id: client.id,
@@ -278,7 +342,14 @@ async function getSupabaseClient(clientId) {
     company: client.company,
     email: client.email || '',
     ownerId: client.owner_id || '',
-    status: client.status?.name || 'Activo'
+    status: client.status?.name || 'Activo',
+    consultor: client.consultor?.name || '',
+    complexity: client.complexity?.name || '',
+    adStatus: client.ad_status?.name || '',
+    meliUser: client.meli_user || '',
+    meetingDay: client.meeting_day ?? null,
+    meetingTime: client.meeting_time || '',
+    meetingFrequency: client.meeting_frequency ?? null
   };
 }
 
@@ -428,9 +499,39 @@ function isHexColor(color) {
   return /^#[0-9a-fA-F]{6}$/.test(String(color || ''));
 }
 
+function parseMeetingDay(value) {
+  if (value === null || value === '' || value === undefined) return null;
+  const day = Number(value);
+  return Number.isInteger(day) && day >= 0 && day <= 6 ? day : null;
+}
+
+function parseMeetingTime(value) {
+  if (!value) return null;
+  const time = String(value).trim();
+  return /^\d{2}:\d{2}(:\d{2})?$/.test(time) ? time.slice(0, 5) : null;
+}
+
+function parseMeetingFrequency(value) {
+  if (value === null || value === '' || value === undefined) return null;
+  const frequency = Number(value);
+  return frequency === 7 || frequency === 15 ? frequency : null;
+}
+
 async function enqueueStatusWrite(operation) {
   const result = statusWriteQueue.then(operation, operation);
   statusWriteQueue = result.catch(() => {});
+  return result;
+}
+
+async function enqueueConsultorWrite(operation) {
+  const result = consultorWriteQueue.then(operation, operation);
+  consultorWriteQueue = result.catch(() => {});
+  return result;
+}
+
+async function enqueueAdStatusWrite(operation) {
+  const result = adStatusWriteQueue.then(operation, operation);
+  adStatusWriteQueue = result.catch(() => {});
   return result;
 }
 
@@ -562,6 +663,134 @@ async function handleApi(req, res, url) {
     }
   }
 
+  if (req.method === 'POST' && url.pathname === '/api/settings/client-consultors') {
+    return enqueueConsultorWrite(async () => {
+      const name = String(body.status || '').trim();
+      const color = isHexColor(body.color) ? String(body.color) : '#388bfd';
+      if (!name) return sendError(res, 400, 'El consultor es obligatorio');
+      const consultors = await getSupabaseConsultors();
+      if (consultors.some((item) => item.name.toLowerCase() === name.toLowerCase())) {
+        return sendError(res, 400, 'Ese consultor ya existe');
+      }
+      await supabaseRest('/client_consultors', {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify([{ name, color, position: await getNextConsultorPosition() }])
+      });
+      await tryRecordSupabaseAudit(body, `Agrego el consultor "${name}"`);
+      return sendJson(res, 201, { settings: await getSupabaseSettings() });
+    });
+  }
+
+  if (segments[0] === 'api' && segments[1] === 'settings' && segments[2] === 'client-consultors' && segments[3]) {
+    const index = Number(segments[3]);
+    if (!Number.isInteger(index) || index < 0) {
+      return sendError(res, 404, 'Consultor no encontrado');
+    }
+
+    if (req.method === 'PATCH') {
+      return enqueueConsultorWrite(async () => {
+        const consultors = await getSupabaseConsultors();
+        const consultorRow = consultors[index];
+        if (!consultorRow) return sendError(res, 404, 'Consultor no encontrado');
+        const nextName = String(body.status || '').trim();
+        const nextColor = isHexColor(body.color) ? String(body.color) : consultorRow.color;
+        if (!nextName) return sendError(res, 400, 'El consultor es obligatorio');
+        const duplicate = consultors.some((item, itemIndex) => (
+          itemIndex !== index && item.name.toLowerCase() === nextName.toLowerCase()
+        ));
+        if (duplicate) return sendError(res, 400, 'Ese consultor ya existe');
+        await supabaseRest(`/client_consultors?id=eq.${encodeURIComponent(consultorRow.id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ name: nextName, color: nextColor })
+        });
+        await tryRecordSupabaseAudit(body, `Edito el consultor "${consultorRow.name}" a "${nextName}"`);
+        return sendJson(res, 200, { settings: await getSupabaseSettings() });
+      });
+    }
+
+    if (req.method === 'DELETE') {
+      return enqueueConsultorWrite(async () => {
+        const consultors = await getSupabaseConsultors();
+        const consultorRow = consultors[index];
+        if (!consultorRow) return sendError(res, 404, 'Consultor no encontrado');
+        if (consultors.length <= 1) return sendError(res, 400, 'Debe conservarse al menos un consultor');
+        const fallback = consultors.find((item) => item.id !== consultorRow.id);
+        await supabaseRest(`/clients?consultor_id=eq.${encodeURIComponent(consultorRow.id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ consultor_id: fallback.id })
+        });
+        await supabaseRest(`/client_consultors?id=eq.${encodeURIComponent(consultorRow.id)}`, { method: 'DELETE' });
+        await tryRecordSupabaseAudit(body, `Saco el consultor "${consultorRow.name}"`);
+        return sendJson(res, 200, { settings: await getSupabaseSettings() });
+      });
+    }
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/settings/ad-statuses') {
+    return enqueueAdStatusWrite(async () => {
+      const name = String(body.status || '').trim();
+      const color = isHexColor(body.color) ? String(body.color) : '#388bfd';
+      if (!name) return sendError(res, 400, 'El tag de publicidad es obligatorio');
+      const items = await getSupabaseAdStatuses();
+      if (items.some((item) => item.name.toLowerCase() === name.toLowerCase())) {
+        return sendError(res, 400, 'Ese tag de publicidad ya existe');
+      }
+      await supabaseRest('/ad_statuses', {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify([{ name, color, position: await getNextAdStatusPosition() }])
+      });
+      await tryRecordSupabaseAudit(body, `Agrego el tag de publicidad "${name}"`);
+      return sendJson(res, 201, { settings: await getSupabaseSettings() });
+    });
+  }
+
+  if (segments[0] === 'api' && segments[1] === 'settings' && segments[2] === 'ad-statuses' && segments[3]) {
+    const index = Number(segments[3]);
+    if (!Number.isInteger(index) || index < 0) {
+      return sendError(res, 404, 'Tag de publicidad no encontrado');
+    }
+
+    if (req.method === 'PATCH') {
+      return enqueueAdStatusWrite(async () => {
+        const items = await getSupabaseAdStatuses();
+        const row = items[index];
+        if (!row) return sendError(res, 404, 'Tag de publicidad no encontrado');
+        const nextName = String(body.status || '').trim();
+        const nextColor = isHexColor(body.color) ? String(body.color) : row.color;
+        if (!nextName) return sendError(res, 400, 'El tag de publicidad es obligatorio');
+        const duplicate = items.some((item, itemIndex) => (
+          itemIndex !== index && item.name.toLowerCase() === nextName.toLowerCase()
+        ));
+        if (duplicate) return sendError(res, 400, 'Ese tag de publicidad ya existe');
+        await supabaseRest(`/ad_statuses?id=eq.${encodeURIComponent(row.id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ name: nextName, color: nextColor })
+        });
+        await tryRecordSupabaseAudit(body, `Edito el tag de publicidad "${row.name}" a "${nextName}"`);
+        return sendJson(res, 200, { settings: await getSupabaseSettings() });
+      });
+    }
+
+    if (req.method === 'DELETE') {
+      return enqueueAdStatusWrite(async () => {
+        const items = await getSupabaseAdStatuses();
+        const row = items[index];
+        if (!row) return sendError(res, 404, 'Tag de publicidad no encontrado');
+        if (items.length <= 1) return sendError(res, 400, 'Debe conservarse al menos un tag de publicidad');
+        const fallback = items.find((item) => item.id !== row.id);
+        await supabaseRest(`/clients?ad_status_id=eq.${encodeURIComponent(row.id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ ad_status_id: fallback.id })
+        });
+        await supabaseRest(`/ad_statuses?id=eq.${encodeURIComponent(row.id)}`, { method: 'DELETE' });
+        await tryRecordSupabaseAudit(body, `Saco el tag de publicidad "${row.name}"`);
+        return sendJson(res, 200, { settings: await getSupabaseSettings() });
+      });
+    }
+  }
+
   if (req.method === 'POST' && url.pathname === '/api/users/invitations') {
     const email = String(body.email || '').trim().toLowerCase();
     const name = String(body.name || email.split('@')[0] || '').trim();
@@ -604,10 +833,22 @@ async function handleApi(req, res, url) {
       company: String(body.company || '').trim(),
       email: String(body.email || '').trim(),
       ownerId: String(body.ownerId || ''),
-      status: String(body.status || 'Activo').trim()
+      status: String(body.status || 'Activo').trim(),
+      consultor: String(body.consultor || '').trim(),
+      complexity: String(body.complexity || '').trim(),
+      adStatus: String(body.adStatus || '').trim(),
+      meliUser: String(body.meliUser || '').trim(),
+      meetingDay: parseMeetingDay(body.meetingDay),
+      meetingTime: parseMeetingTime(body.meetingTime),
+      meetingFrequency: parseMeetingFrequency(body.meetingFrequency)
     };
     if (!client.name || !client.company) return sendError(res, 400, 'Nombre y empresa son obligatorios');
-    const statusId = await getStatusIdByName(client.status);
+    const [statusId, consultorId, complexityId, adStatusId] = await Promise.all([
+      getStatusIdByName(client.status),
+      getConsultorIdByName(client.consultor),
+      getComplexityIdByName(client.complexity),
+      getAdStatusIdByName(client.adStatus)
+    ]);
     const [createdClient] = await supabaseRest('/clients', {
       method: 'POST',
       headers: { Prefer: 'return=representation' },
@@ -617,7 +858,14 @@ async function handleApi(req, res, url) {
         company: client.company,
         email: client.email || null,
         owner_id: client.ownerId || null,
-        status_id: statusId
+        status_id: statusId,
+        consultor_id: consultorId,
+        complexity_id: complexityId,
+        ad_status_id: adStatusId,
+        meli_user: client.meliUser || null,
+        meeting_day: client.meetingDay,
+        meeting_time: client.meetingTime,
+        meeting_frequency: client.meetingFrequency
       }])
     });
     recordAuditInBackground(body, `Creo el cliente "${client.name}"`);
@@ -635,10 +883,22 @@ async function handleApi(req, res, url) {
         company: body.company === undefined ? client.company : String(body.company).trim(),
         email: body.email === undefined ? client.email : String(body.email).trim(),
         ownerId: body.ownerId === undefined ? client.ownerId || '' : String(body.ownerId),
-        status: body.status === undefined ? client.status || 'Activo' : String(body.status || 'Activo').trim()
+        status: body.status === undefined ? client.status || 'Activo' : String(body.status || 'Activo').trim(),
+        consultor: body.consultor === undefined ? client.consultor || '' : String(body.consultor).trim(),
+        complexity: body.complexity === undefined ? client.complexity || '' : String(body.complexity || '').trim(),
+        adStatus: body.adStatus === undefined ? client.adStatus || '' : String(body.adStatus || '').trim(),
+        meliUser: body.meliUser === undefined ? client.meliUser || '' : String(body.meliUser || '').trim(),
+        meetingDay: body.meetingDay === undefined ? client.meetingDay : parseMeetingDay(body.meetingDay),
+        meetingTime: body.meetingTime === undefined ? client.meetingTime : parseMeetingTime(body.meetingTime),
+        meetingFrequency: body.meetingFrequency === undefined ? client.meetingFrequency : parseMeetingFrequency(body.meetingFrequency)
       };
       if (!payload.name || !payload.company) return sendError(res, 400, 'Nombre y empresa son obligatorios');
-      const statusId = await getStatusIdByName(payload.status);
+      const [statusId, consultorId, complexityId, adStatusId] = await Promise.all([
+        getStatusIdByName(payload.status),
+        getConsultorIdByName(payload.consultor),
+        getComplexityIdByName(payload.complexity),
+        getAdStatusIdByName(payload.adStatus)
+      ]);
       await supabaseRest(`/clients?id=eq.${encodeURIComponent(client.id)}`, {
         method: 'PATCH',
         headers: { Prefer: 'return=representation' },
@@ -647,7 +907,14 @@ async function handleApi(req, res, url) {
           company: payload.company,
           email: payload.email || null,
           owner_id: payload.ownerId || null,
-          status_id: statusId
+          status_id: statusId,
+          consultor_id: consultorId,
+          complexity_id: complexityId,
+          ad_status_id: adStatusId,
+          meli_user: payload.meliUser || null,
+          meeting_day: payload.meetingDay,
+          meeting_time: payload.meetingTime,
+          meeting_frequency: payload.meetingFrequency
         })
       });
       recordAuditInBackground(body, `Modifico el cliente "${client.name}"`);
