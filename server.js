@@ -216,7 +216,7 @@ async function getSupabaseState() {
     getSupabaseComplexities(),
     getSupabaseAdStatuses(),
     supabaseRest('/settings_audit?select=action,user_id,user_name,created_at&order=created_at.desc&limit=50'),
-    supabaseRest('/clients?select=id,name,company,email,owner_id,status_id,consultor_id,complexity_id,ad_status_id,meli_user,meeting_day,meeting_time,meeting_frequency'),
+    supabaseRest('/clients?select=id,name,company,email,owner_id,status_id,consultor_id,complexity_id,ad_status_id,meli_user,meeting_day,meeting_time,meeting_frequency,time_bank_seconds'),
     supabaseRest('/boards?select=id,name,color,position&order=position.asc'),
     supabaseRest('/board_columns?select=id,board_id,name,show_timer,position&order=position.asc'),
     supabaseRest('/cards?select=id,board_id,column_id,client_id,title,description,due_date,created_by,assigned_to,entered_column_at,recurring_task_id,occurrence_date'),
@@ -245,6 +245,7 @@ async function getSupabaseState() {
       meetingDay: client.meeting_day ?? null,
       meetingTime: client.meeting_time || '',
       meetingFrequency: client.meeting_frequency ?? null,
+      timeBankSeconds: Number(client.time_bank_seconds || 0),
       links: clientLinks.filter((link) => link.client_id === client.id).map((link) => ({
         id: link.id,
         url: link.url,
@@ -492,7 +493,7 @@ async function getSupabaseSettings() {
 }
 
 async function getSupabaseClient(clientId) {
-  const [client] = await supabaseRest(`/clients?select=id,name,company,email,owner_id,meeting_day,meeting_time,meeting_frequency,complexity_id,ad_status_id,meli_user,status:client_statuses(name),consultor:client_consultors(name),complexity:complexities(name),ad_status:ad_statuses(name)&id=eq.${encodeURIComponent(clientId)}&limit=1`);
+  const [client] = await supabaseRest(`/clients?select=id,name,company,email,owner_id,meeting_day,meeting_time,meeting_frequency,time_bank_seconds,complexity_id,ad_status_id,meli_user,status:client_statuses(name),consultor:client_consultors(name),complexity:complexities(name),ad_status:ad_statuses(name)&id=eq.${encodeURIComponent(clientId)}&limit=1`);
   if (!client) return null;
   return {
     id: client.id,
@@ -507,7 +508,8 @@ async function getSupabaseClient(clientId) {
     meliUser: client.meli_user || '',
     meetingDay: client.meeting_day ?? null,
     meetingTime: client.meeting_time || '',
-    meetingFrequency: client.meeting_frequency ?? null
+    meetingFrequency: client.meeting_frequency ?? null,
+    timeBankSeconds: Number(client.time_bank_seconds || 0)
   };
 }
 
@@ -1128,6 +1130,15 @@ async function handleApi(req, res, url) {
       });
       recordAuditInBackground(body, `Modifico el cliente "${client.name}"`);
       return sendJson(res, 200, { client: { id: client.id, ...payload } });
+    }
+
+    if (req.method === 'POST' && segments[3] === 'time-bank' && segments[4] === 'reset') {
+      await supabaseRest('/rpc/reset_client_time_bank', {
+        method: 'POST',
+        body: JSON.stringify({ p_client_id: client.id })
+      });
+      recordAuditInBackground(body, `Reinicio el banco de tiempo de "${client.name}"`);
+      return sendJson(res, 200, { timeBankSeconds: 0 });
     }
 
     if (req.method === 'POST' && segments[3] === 'links' && segments.length === 4) {

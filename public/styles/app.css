@@ -760,6 +760,30 @@ header {
   font-weight: 600;
 }
 
+.client-table-actions {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.client-status-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.client-status-filter .form-control {
+  width: 180px;
+}
+
+.empty-table-message {
+  padding: 28px 16px !important;
+  color: var(--text-muted);
+  text-align: center;
+}
+
 .table {
   width: 100%;
   border-collapse: collapse;
@@ -1063,6 +1087,20 @@ header {
   font-size: 0.8rem;
 }
 
+.time-bank-panel {
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: rgba(56, 139, 253, 0.05);
+}
+
+.time-bank-reset-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .modal-actions {
   display: flex;
   justify-content: flex-end;
@@ -1213,6 +1251,22 @@ header {
   .section-header {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .client-table-actions {
+    width: 100%;
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .client-status-filter {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .client-status-filter .form-control,
+  .client-table-actions .btn {
+    width: 100%;
   }
 
   .column {
