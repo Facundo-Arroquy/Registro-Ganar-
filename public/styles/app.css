@@ -577,7 +577,8 @@ header {
 }
 
 .due-date-badge,
-.time-badge {
+.time-badge,
+.recurring-badge {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -586,6 +587,11 @@ header {
   border-radius: 4px;
   background-color: rgba(255, 255, 255, 0.05);
   color: var(--text-muted);
+}
+
+.recurring-badge {
+  background-color: rgba(163, 113, 247, 0.16);
+  color: #d2a8ff;
 }
 
 .due-date-badge.expired {
@@ -1012,11 +1018,66 @@ header {
   height: 16px;
 }
 
+.recurrence-settings {
+  padding: 14px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: rgba(56, 139, 253, 0.05);
+}
+
+.recurrence-settings[hidden] {
+  display: none;
+}
+
+.recurrence-date-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.recurrence-day-row {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.recurrence-day-row .checkbox-group,
+.recurrence-day-row .checkbox-group span {
+  margin-bottom: 0;
+}
+
+.optional-label {
+  font-weight: 400;
+  opacity: 0.75;
+}
+
+.recurrence-summary {
+  padding: 10px 12px;
+  margin-bottom: 16px;
+  border-radius: var(--radius-sm);
+  background: rgba(163, 113, 247, 0.12);
+  color: #d2a8ff;
+  font-size: 0.8rem;
+}
+
 .modal-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
   margin-top: 20px;
+}
+
+@media (max-width: 560px) {
+  .recurrence-date-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .recurrence-day-row {
+    grid-template-columns: 100px minmax(0, 1fr);
+  }
 }
 
 .error-message {
