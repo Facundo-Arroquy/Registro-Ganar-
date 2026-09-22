@@ -768,14 +768,18 @@ header {
 
 .client-status-filter {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 5px;
   color: var(--text-muted);
   font-size: 0.8rem;
 }
 
 .client-status-filter .form-control {
-  width: 180px;
+  width: 130px;
+  min-width: 130px;
+  padding: 5px 8px;
+  font-size: 0.78rem;
 }
 
 .empty-table-message {
@@ -1259,12 +1263,6 @@ header {
     flex-direction: column;
   }
 
-  .client-status-filter {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .client-status-filter .form-control,
   .client-table-actions .btn {
     width: 100%;
   }

@@ -122,13 +122,14 @@ function renderClientStatusFilter() {
   const statuses = getClientStatuses().map(getStatusName).filter(Boolean);
   if (selectedStatus && !statuses.includes(selectedStatus)) selectedStatus = '';
   select.innerHTML = `
-    <option value="">Todos los estados</option>
+    <option value="">Todos</option>
     ${statuses.map((status) => `<option value="${escapeHtml(status)}" ${status === selectedStatus ? 'selected' : ''}>${escapeHtml(status)}</option>`).join('')}
   `;
   select.onchange = () => {
     selectedStatus = select.value;
     renderDashboard();
   };
+  select.onclick = (event) => event.stopPropagation();
 }
 
 function getSortValue(row, column) {
