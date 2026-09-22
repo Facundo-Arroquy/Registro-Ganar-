@@ -33,7 +33,9 @@
       <section class="clients-section">
         <div class="section-header">
           <h2 style="font-size: 1.1rem; font-weight: 600;">Gestion de Clientes</h2>
-          <button class="btn" type="button" data-open-client>Agregar Cliente</button>
+          <div class="client-table-actions">
+            <button class="btn" type="button" data-open-client>Agregar Cliente</button>
+          </div>
         </div>
         <div class="table-wrap">
         <table class="table">
@@ -45,13 +47,20 @@
               <th class="sortable-th" data-sort="links">Links <span class="sort-icon"></span></th>
               <th class="sortable-th" data-sort="owner">Personal a cargo <span class="sort-icon"></span></th>
               <th class="sortable-th" data-sort="consultor">Consultor <span class="sort-icon"></span></th>
-              <th class="sortable-th" data-sort="status">Estado <span class="sort-icon"></span></th>
+              <th>
+                <label class="client-status-filter">
+                  <span>Estado</span>
+                  <select class="form-control" data-client-status-filter>
+                    <option value="">Todos</option>
+                  </select>
+                </label>
+              </th>
               <th class="sortable-th" data-sort="complexity">Complejidad <span class="sort-icon"></span></th>
               <th class="sortable-th" data-sort="adStatus">Publicidad <span class="sort-icon"></span></th>
               <th class="sortable-th" data-sort="meeting">Reunion <span class="sort-icon"></span></th>
               <th class="sortable-th" data-sort="cards">Tarjetas Asignadas <span class="sort-icon"></span></th>
               <th class="sortable-th" data-sort="timedCards">Con Timer <span class="sort-icon"></span></th>
-              <th class="sortable-th" data-sort="avgTime">Promedio en Timer <span class="sort-icon"></span></th>
+              <th class="sortable-th" data-sort="timeBank">Banco de Tiempo <span class="sort-icon"></span></th>
               <th></th>
             </tr>
           </thead>

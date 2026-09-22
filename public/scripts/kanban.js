@@ -77,6 +77,7 @@ function renderCard(card, showTimer) {
       <div class="card-title">${escapeHtml(card.title)}</div>
       ${card.description ? `<div class="card-description">${escapeHtml(card.description)}</div>` : ''}
       <div class="badges-container">
+        ${card.recurringTaskId ? '<div class="recurring-badge" title="Tarea recurrente">↻ Recurrente</div>' : ''}
         ${dueStatus ? `<div class="due-date-badge ${dueStatus.status}">${escapeHtml(dueStatus.label)}</div>` : ''}
         ${showTimer ? `<div class="time-badge">${escapeHtml(getTimeInColumn(card.enteredColumnAt))}</div>` : ''}
       </div>
@@ -202,6 +203,10 @@ async function openColumnModal() {
 
 function openCardModal(columnId, card = null) {
   const isEdit = Boolean(card);
+  const board = getActiveBoard(state);
+  const recurringTask = card?.recurringTaskId ? state.recurringTasks?.find((task) => task.id === card.recurringTaskId) : null;
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(new Date());
+  const currentWeekday = new Date(`${today}T12:00:00Z`).getUTCDay() || 7;
   const overlay = openModal(`
     <div class="modal-overlay">
       <form class="modal">
@@ -209,11 +214,29 @@ function openCardModal(columnId, card = null) {
         <div class="form-group"><label>Titulo</label><input type="text" id="card-title-input" class="form-control" value="${escapeHtml(card?.title || '')}"></div>
         <div class="form-group"><label>Cliente</label><select id="card-client-select" class="form-control">${clientOptions(card?.clientId)}</select></div>
         <div class="form-group"><label>Descripcion</label><textarea id="card-desc-input" class="form-control" rows="3">${escapeHtml(card?.description || '')}</textarea></div>
-        <div class="form-group"><label>Fecha de Vencimiento</label><input type="date" id="card-due-input" class="form-control" value="${escapeHtml(card?.dueDate || '')}"></div>
+        <div class="form-group" data-due-date><label>Fecha de Vencimiento</label><input type="date" id="card-due-input" class="form-control" value="${escapeHtml(card?.dueDate || '')}"></div>
         <div class="form-group"><label>Asignar a</label><select id="card-assignee-select" class="form-control">${userOptions(card?.assignedTo)}</select></div>
+        ${!isEdit ? `
+          <div class="form-group recurrence-toggle">
+            <label class="checkbox-group"><input type="checkbox" id="card-recurring-toggle"><span>Repetir esta tarea</span></label>
+          </div>
+          <div class="recurrence-settings" data-recurrence-settings hidden>
+            <div class="recurrence-date-grid">
+              <div class="form-group"><label>Fecha de inicio</label><input type="date" id="recurrence-start-input" class="form-control" value="${today}" min="${today}"></div>
+              <div class="form-group"><label>Fecha de fin <span class="optional-label">(opcional)</span></label><input type="date" id="recurrence-end-input" class="form-control" min="${today}"></div>
+            </div>
+            <div class="form-group">
+              <label>Dias y columna inicial</label>
+              <div class="recurrence-days">
+                ${recurrenceDayRows(board, columnId, currentWeekday)}
+              </div>
+            </div>
+          </div>
+        ` : recurringTask ? `<div class="recurrence-summary">↻ Ocurrencia de una serie semanal${recurringTask.endDate ? ` hasta el ${escapeHtml(recurringTask.endDate)}` : ' sin fecha de fin'}.</div>` : ''}
         <div class="modal-actions" style="justify-content: ${isEdit ? 'space-between' : 'flex-end'};">
           ${isEdit ? '<button class="btn btn-danger" type="button" data-delete-card>Eliminar Tarjeta</button>' : ''}
           <div>
+            ${recurringTask?.active ? '<button class="btn btn-secondary" type="button" data-stop-recurrence>Detener recurrencia</button>' : ''}
             <button class="btn btn-secondary" type="button" data-close-modal>Cancelar</button>
             <button class="btn" type="submit">${isEdit ? 'Guardar Cambios' : 'Crear Tarjeta'}</button>
           </div>
@@ -221,6 +244,16 @@ function openCardModal(columnId, card = null) {
       </form>
     </div>
   `);
+  const recurrenceToggle = overlay.querySelector('#card-recurring-toggle');
+  recurrenceToggle?.addEventListener('change', () => {
+    overlay.querySelector('[data-recurrence-settings]').hidden = !recurrenceToggle.checked;
+    overlay.querySelector('[data-due-date]').hidden = recurrenceToggle.checked;
+  });
+  overlay.querySelector('#recurrence-start-input')?.addEventListener('change', (event) => {
+    const endInput = overlay.querySelector('#recurrence-end-input');
+    endInput.min = event.target.value;
+    if (endInput.value && endInput.value < event.target.value) endInput.value = event.target.value;
+  });
   let submitting = false;
   overlay.querySelector('form').addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -246,6 +279,35 @@ function openCardModal(columnId, card = null) {
       alert(error.message);
     }
   });
+  overlay.querySelector('[data-stop-recurrence]')?.addEventListener('click', async function () {
+    if (!confirm('Se detendran las ocurrencias futuras. Las tarjetas ya creadas se conservaran.')) return;
+    setButtonLoading(this, true, 'Deteniendo...');
+    try {
+      await api(`/api/boards/${board.id}/recurring-tasks/${recurringTask.id}`, {
+        method: 'DELETE',
+        body: JSON.stringify(auditUser())
+      });
+      closeModal();
+      await refresh();
+    } catch (error) {
+      setButtonLoading(this, false);
+      alert(error.message);
+    }
+  });
+}
+
+function recurrenceDayRows(board, defaultColumnId, currentWeekday) {
+  const dayNames = ['Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado', 'Domingo'];
+  const columnOptions = board.columns.map((column) => `<option value="${escapeHtml(column.id)}" ${column.id === defaultColumnId ? 'selected' : ''}>${escapeHtml(column.name)}</option>`).join('');
+  return dayNames.map((name, index) => `
+    <div class="recurrence-day-row">
+      <label class="checkbox-group">
+        <input type="checkbox" data-recurrence-day="${index + 1}" ${currentWeekday === index + 1 ? 'checked' : ''}>
+        <span>${name}</span>
+      </label>
+      <select class="form-control" data-recurrence-column="${index + 1}">${columnOptions}</select>
+    </div>
+  `).join('');
 }
 
 function openCardDetail(cardId) {
@@ -256,6 +318,7 @@ function openCardDetail(cardId) {
 
 async function saveCard(columnId, card) {
   const board = getActiveBoard(state);
+  const isRecurring = !card && document.querySelector('#card-recurring-toggle')?.checked;
   const payload = {
     columnId,
     title: document.querySelector('#card-title-input').value.trim(),
@@ -267,6 +330,20 @@ async function saveCard(columnId, card) {
     ...auditUser()
   };
   if (!payload.title) return;
+  if (isRecurring) {
+    payload.startDate = document.querySelector('#recurrence-start-input').value;
+    payload.endDate = document.querySelector('#recurrence-end-input').value;
+    payload.days = [...document.querySelectorAll('[data-recurrence-day]:checked')].map((input) => ({
+      weekday: Number(input.dataset.recurrenceDay),
+      columnId: document.querySelector(`[data-recurrence-column="${input.dataset.recurrenceDay}"]`).value
+    }));
+    if (!payload.startDate || !payload.days.length) throw new Error('Selecciona una fecha de inicio y al menos un dia.');
+    if (payload.endDate && payload.endDate < payload.startDate) throw new Error('La fecha de fin no puede ser anterior al inicio.');
+    await api(`/api/boards/${board.id}/recurring-tasks`, { method: 'POST', body: JSON.stringify(payload) });
+    closeModal();
+    await refresh();
+    return;
+  }
   const path = card ? `/api/boards/${board.id}/cards/${card.id}` : `/api/boards/${board.id}/cards`;
   await api(path, { method: card ? 'PATCH' : 'POST', body: JSON.stringify(payload) });
   closeModal();

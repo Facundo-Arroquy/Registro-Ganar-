@@ -7,6 +7,7 @@ const currentUser = requireSession();
 let state;
 let sortColumn = null;
 let sortDirection = 'asc';
+let selectedStatus = '';
 
 async function boot() {
   state = await loadAppState();
@@ -27,6 +28,7 @@ function renderPage() {
   });
   document.querySelector('[data-open-client]').onclick = () => openClientModal();
   document.querySelector('[data-add-general-link]').onclick = () => openGeneralLinkModal();
+  renderClientStatusFilter();
   renderDashboard();
   renderGeneralLinks();
 }
@@ -37,14 +39,16 @@ function renderDashboard() {
   document.querySelector('#stat-active-cards').textContent = cards.length;
   document.querySelector('#stat-expired-cards').textContent = cards.filter((card) => getDueDateStatus(card.dueDate)?.status === 'expired').length;
 
-  const enriched = state.clients.map((client) => ({
-    client,
-    cards: getClientCards(client.id),
-    timedCards: getTimedClientCards(client.id),
-    averageMs: getAverageTimedMs(getTimedClientCards(client.id)),
-    owner: state.users.find((user) => user.id === client.ownerId),
-    links: client.links || []
-  }));
+  const enriched = state.clients
+    .filter((client) => !selectedStatus || (client.status || 'Activo') === selectedStatus)
+    .map((client) => ({
+      client,
+      cards: getClientCards(client.id),
+      timedCards: getTimedClientCards(client.id),
+      timeBankSeconds: Number(client.timeBankSeconds || 0),
+      owner: state.users.find((user) => user.id === client.ownerId),
+      links: client.links || []
+    }));
 
   if (sortColumn) {
     enriched.sort((a, b) => {
@@ -60,7 +64,7 @@ function renderDashboard() {
     });
   }
 
-  document.querySelector('#clients-table-body').innerHTML = enriched.map(({ client, cards: clientCards, timedCards, averageMs, owner, links }) => `
+  document.querySelector('#clients-table-body').innerHTML = enriched.length ? enriched.map(({ client, cards: clientCards, timedCards, timeBankSeconds, owner, links }) => `
     <tr class="editable-row" data-edit-client="${escapeHtml(client.id)}">
       <td><strong>${escapeHtml(client.name)}</strong></td>
       <td>${escapeHtml(client.company)}</td>
@@ -74,10 +78,10 @@ function renderDashboard() {
       <td>${formatMeeting(client)}</td>
       <td><span class="card-count">${clientCards.length} tareas</span></td>
       <td><span class="card-count">${timedCards.length} tags</span></td>
-      <td>${averageMs ? `<span class="time-badge">${escapeHtml(formatDuration(averageMs))}</span>` : '<span style="color: var(--text-muted);">Sin datos</span>'}</td>
+      <td>${timeBankSeconds ? `<span class="time-badge">${escapeHtml(formatDuration(timeBankSeconds))}</span>` : '<span style="color: var(--text-muted);">0m</span>'}</td>
       <td><button class="btn btn-secondary btn-sm" type="button" data-edit-client-button="${escapeHtml(client.id)}">Editar</button></td>
     </tr>
-  `).join('');
+  `).join('') : '<tr><td colspan="14" class="empty-table-message">No hay clientes con este estado.</td></tr>';
 
   document.querySelectorAll('.sortable-th').forEach((th) => {
     const icon = th.querySelector('.sort-icon');
@@ -113,6 +117,21 @@ function renderDashboard() {
   });
 }
 
+function renderClientStatusFilter() {
+  const select = document.querySelector('[data-client-status-filter]');
+  const statuses = getClientStatuses().map(getStatusName).filter(Boolean);
+  if (selectedStatus && !statuses.includes(selectedStatus)) selectedStatus = '';
+  select.innerHTML = `
+    <option value="">Todos</option>
+    ${statuses.map((status) => `<option value="${escapeHtml(status)}" ${status === selectedStatus ? 'selected' : ''}>${escapeHtml(status)}</option>`).join('')}
+  `;
+  select.onchange = () => {
+    selectedStatus = select.value;
+    renderDashboard();
+  };
+  select.onclick = (event) => event.stopPropagation();
+}
+
 function getSortValue(row, column) {
   switch (column) {
     case 'name': return row.client.name.toLowerCase();
@@ -127,7 +146,7 @@ function getSortValue(row, column) {
     case 'meeting': return row.client.meetingDay ?? 99;
     case 'cards': return row.cards.length;
     case 'timedCards': return row.timedCards.length;
-    case 'avgTime': return row.averageMs;
+    case 'timeBank': return row.timeBankSeconds;
     default: return '';
   }
 }
@@ -147,21 +166,15 @@ function getTimedClientCards(clientId) {
   });
 }
 
-function getAverageTimedMs(cards) {
-  if (!cards.length) return 0;
-  const totalMs = cards.reduce((sum, card) => sum + Math.max(Date.now() - Number(card.enteredColumnAt), 0), 0);
-  return totalMs / cards.length;
-}
+function formatDuration(durationSeconds) {
+  const minutes = Math.floor(durationSeconds / 60);
+  const hours = Math.floor(durationSeconds / (60 * 60));
+  const days = Math.floor(durationSeconds / (60 * 60 * 24));
 
-function formatDuration(durationMs) {
-  const minutes = Math.floor(durationMs / (1000 * 60));
-  const hours = Math.floor(durationMs / (1000 * 60 * 60));
-  const days = Math.floor(durationMs / (1000 * 60 * 60 * 24));
-
-  if (minutes < 60) return `${minutes}m promedio`;
-  if (hours < 24) return `${hours}h promedio`;
+  if (minutes < 60) return `${minutes}m`;
+  if (hours < 24) return `${hours}h ${minutes % 60}m`;
   const remainingHours = hours % 24;
-  return remainingHours ? `${days}d ${remainingHours}h promedio` : `${days}d promedio`;
+  return remainingHours ? `${days}d ${remainingHours}h` : `${days}d`;
 }
 
 function openClientModal(client = null) {
@@ -223,6 +236,13 @@ function openClientModal(client = null) {
           </div>
         </div>
         ${isEdit ? `
+        <div class="form-group time-bank-panel">
+          <label>Banco de tiempo acumulado</label>
+          <div class="time-bank-reset-row">
+            <span class="time-badge">${escapeHtml(formatDuration(Number(client.timeBankSeconds || 0)))}</span>
+            <button class="btn btn-secondary btn-sm" type="button" data-reset-time-bank>Reiniciar banco</button>
+          </div>
+        </div>
         <div class="form-group">
           <label>Links</label>
           <div id="client-links-list">
@@ -249,6 +269,21 @@ function openClientModal(client = null) {
   `);
 
   if (isEdit) {
+    overlay.querySelector('[data-reset-time-bank]').addEventListener('click', async function () {
+      if (!confirm(`Reiniciar el banco de tiempo de ${client.name}? Esta accion no se puede deshacer.`)) return;
+      setButtonLoading(this, true, 'Reiniciando...');
+      try {
+        await api(`/api/clients/${client.id}/time-bank/reset`, {
+          method: 'POST',
+          body: JSON.stringify(auditUser())
+        });
+        closeModal();
+        await refresh();
+      } catch (error) {
+        setButtonLoading(this, false);
+        alert(error.message);
+      }
+    });
     overlay.querySelector('[data-add-link]').addEventListener('click', async function () {
       const labelInput = overlay.querySelector('#link-label-input');
       const urlInput = overlay.querySelector('#link-url-input');
