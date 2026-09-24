@@ -1,5 +1,5 @@
 import { api, requireSession } from './api.js';
-import { getActiveBoard, loadAppState, setActiveBoard } from './app-state.js';
+import { getActiveBoard, loadAppState, refreshAppState, setActiveBoard } from './app-state.js';
 import { closeModal, openModal, renderSidebar } from './layout.js';
 import { escapeHtml, getDueDateStatus, getInitials, getTimeInColumn, setButtonLoading } from './utils.js';
 
@@ -16,7 +16,7 @@ async function boot() {
 
 async function refresh() {
   const activeBoardId = state.activeBoardId;
-  state = await loadAppState();
+  state = await refreshAppState();
   if (state.boards.some((board) => board.id === activeBoardId)) setActiveBoard(state, activeBoardId);
   renderPage();
 }
@@ -461,7 +461,7 @@ function openBoardSettings() {
     try {
       await api(`/api/boards/${board.id}`, { method: 'DELETE', body: JSON.stringify(auditUser()) });
       closeModal();
-      state = await loadAppState();
+      state = await refreshAppState();
       localStorage.setItem('activeBoardId', state.activeBoardId);
       renderPage();
     } catch (error) {

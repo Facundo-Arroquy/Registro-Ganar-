@@ -1,5 +1,5 @@
 import { api, requireSession } from './api.js';
-import { loadAppState } from './app-state.js';
+import { loadAppState, refreshAppState } from './app-state.js';
 import { closeModal, openModal, renderSidebar } from './layout.js';
 import { escapeHtml, getDueDateStatus, setButtonLoading } from './utils.js';
 
@@ -15,7 +15,7 @@ async function boot() {
 }
 
 async function refresh() {
-  state = await loadAppState();
+  state = await refreshAppState();
   renderPage();
 }
 

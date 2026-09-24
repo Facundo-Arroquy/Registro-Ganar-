@@ -1449,7 +1449,9 @@ async function serveStatic(req, res, url) {
     '/login': 'login.html',
     '/kanban': 'kanban.html',
     '/dashboard': 'dashboard.html',
-    '/configuracion': 'configuracion.html'
+    '/configuracion': 'configuracion.html',
+    '/tableros': 'tableros.html',
+    '/usuarios': 'usuarios.html'
   }[url.pathname];
   const requestedPath = routeFile ? path.join(publicDir, routeFile) : path.join(publicDir, url.pathname);
   const normalizedPath = path.normalize(requestedPath);
