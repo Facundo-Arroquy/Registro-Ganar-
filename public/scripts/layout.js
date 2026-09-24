@@ -4,16 +4,12 @@ import { escapeHtml, getInitials, setButtonLoading } from './utils.js';
 export function renderSidebar({ state, currentUser, activePage, onRefresh }) {
   const sidebar = document.querySelector('[data-sidebar]');
   sidebar.innerHTML = `
-    <a class="logo" href="/dashboard">Gemini CRM</a>
+    <a class="logo" href="/dashboard">WIM</a>
     <a class="nav-btn ${activePage === 'dashboard' ? 'active' : ''}" href="/dashboard">Dashboard</a>
 
-    <div class="section-title">Tableros</div>
-    <ul class="board-list" id="board-list"></ul>
-    <button class="btn btn-secondary" type="button" data-open-board style="width: 100%; margin-bottom: 20px;">Nuevo Tablero</button>
-
-    <div class="section-title">Usuarios</div>
-    <ul class="user-list" id="user-list"></ul>
-    <button class="btn btn-secondary" type="button" data-open-invite style="width: 100%;">Invitar Usuario</button>
+    <a class="nav-btn ${activePage === 'tableros' ? 'active' : ''}" href="/tableros">Tableros</a>
+    <a class="nav-btn ${activePage === 'calendarios' ? 'active' : ''}" href="/calendarios">Calendarios</a>
+    <a class="nav-btn ${activePage === 'usuarios' ? 'active' : ''}" href="/usuarios">Usuarios</a>
 
     <div class="sidebar-settings">
       <div class="section-title">Configuracion</div>
@@ -29,46 +25,11 @@ export function renderSidebar({ state, currentUser, activePage, onRefresh }) {
     </div>
   `;
 
-  sidebar.querySelector('#board-list').innerHTML = state.boards.map((board) => `
-    <li class="board-item ${board.id === state.activeBoardId ? 'active' : ''}" data-board-id="${escapeHtml(board.id)}">
-      <div class="board-color-dot" style="background-color: ${escapeHtml(board.color)}"></div>
-      <span>${escapeHtml(board.name)}</span>
-      <button class="btn-icon board-delete-btn" type="button" data-delete-board="${escapeHtml(board.id)}" title="Eliminar tablero">Eliminar</button>
-    </li>
-  `).join('');
-
-  sidebar.querySelector('#user-list').innerHTML = state.users.map((user) => `
-    <li class="user-item" data-user-summary="${escapeHtml(user.id)}">
-      <div class="avatar">${getInitials(user.name)}</div>
-      <span>${escapeHtml(user.name)}</span>
-    </li>
-  `).join('');
-
-  sidebar.querySelectorAll('[data-board-id]').forEach((item) => {
-    item.addEventListener('click', () => {
-      localStorage.setItem('activeBoardId', item.dataset.boardId);
-      window.location.href = '/kanban';
-    });
-  });
-
-  sidebar.querySelectorAll('[data-delete-board]').forEach((button) => {
-    button.addEventListener('click', async (event) => {
-      event.stopPropagation();
-      await deleteBoard({ state, currentUser, boardId: button.dataset.deleteBoard, onRefresh, button });
-    });
-  });
-
-  sidebar.querySelectorAll('[data-user-summary]').forEach((item) => {
-    item.addEventListener('click', () => openUserSummaryModal({ state, userId: item.dataset.userSummary }));
-  });
-
   sidebar.querySelector('[data-logout]').addEventListener('click', () => {
     clearSession();
     window.location.href = '/login';
   });
 
-  sidebar.querySelector('[data-open-board]').addEventListener('click', () => openBoardModal({ state, currentUser, onRefresh }));
-  sidebar.querySelector('[data-open-invite]').addEventListener('click', () => openInviteModal({ onRefresh }));
   sidebar.querySelector('[data-open-profile]').addEventListener('click', () => openProfileModal({ currentUser, onRefresh }));
 
   initSidebarToggle();
@@ -132,7 +93,7 @@ async function deleteBoard({ state, currentUser, boardId, onRefresh, button }) {
   }
 }
 
-function openUserSummaryModal({ state, userId }) {
+export function openUserSummaryModal({ state, userId }) {
   const user = state.users.find((item) => item.id === userId);
   if (!user) return;
   const clients = state.clients.filter((client) => client.ownerId === user.id);
@@ -153,6 +114,7 @@ function openUserSummaryModal({ state, userId }) {
             <tr>
               <th>Cliente</th>
               <th>Empresa</th>
+              <th>Complejidad</th>
               <th>Estado</th>
             </tr>
           </thead>
@@ -161,11 +123,12 @@ function openUserSummaryModal({ state, userId }) {
               <tr>
                 <td><strong>${escapeHtml(client.name)}</strong></td>
                 <td>${escapeHtml(client.company)}</td>
+                <td>${client.complexity ? complexityBadge(state, client.complexity) : '<span style="color: var(--text-muted);">-</span>'}</td>
                 <td>${statusBadge(state, client.status || 'Activo')}</td>
               </tr>
             `).join('') : `
               <tr>
-                <td colspan="3" style="color: var(--text-muted);">Sin clientes asignados</td>
+                <td colspan="4" style="color: var(--text-muted);">Sin clientes asignados</td>
               </tr>
             `}
           </tbody>
@@ -178,6 +141,13 @@ function openUserSummaryModal({ state, userId }) {
 function statusBadge(state, status) {
   const color = getStatusColor(state, status);
   return `<span class="status-badge custom-status" style="--status-color: ${escapeHtml(color)};">${escapeHtml(status)}</span>`;
+}
+
+function complexityBadge(state, name) {
+  const complexities = state.settings?.complexities || [];
+  const item = complexities.find((c) => (typeof c === 'string' ? c : c?.name) === name);
+  const color = (item && typeof item === 'object' && isHexColor(item.color)) ? item.color : '#388bfd';
+  return `<span class="status-badge custom-status" style="--status-color: ${escapeHtml(color)};">${escapeHtml(name)}</span>`;
 }
 
 function getStatusColor(state, status) {
@@ -224,7 +194,7 @@ export function closeModal() {
   }, 160);
 }
 
-function openBoardModal({ state, currentUser, onRefresh }) {
+export function openBoardModal({ state, currentUser, onRefresh }) {
   const overlay = openModal(`
     <div class="modal-overlay">
       <form class="modal">
@@ -328,7 +298,7 @@ function openProfileModal({ currentUser, onRefresh }) {
   });
 }
 
-function openInviteModal({ onRefresh }) {
+export function openInviteModal({ onRefresh }) {
   const overlay = openModal(`
     <div class="modal-overlay">
       <form class="modal">

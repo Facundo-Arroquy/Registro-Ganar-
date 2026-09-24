@@ -84,6 +84,74 @@ function isoWeekday(dateString) {
   return weekday === 0 ? 7 : weekday;
 }
 
+function isDateString(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
+}
+
+function isTimeString(value) {
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(String(value || ''));
+}
+
+function argentinaDateTime(dateString, timeString) {
+  return new Date(`${dateString}T${timeString}:00-03:00`).toISOString();
+}
+
+function argentinaParts(value) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Argentina/Buenos_Aires',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23'
+  }).formatToParts(new Date(value));
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return { date: `${values.year}-${values.month}-${values.day}`, time: `${values.hour}:${values.minute}` };
+}
+
+function daysBetween(first, second) {
+  return Math.round((new Date(`${second}T12:00:00Z`) - new Date(`${first}T12:00:00Z`)) / 86400000);
+}
+
+function expandCalendarEvent(event, rangeStart, rangeEnd, users, exceptions) {
+  const start = argentinaParts(event.starts_at);
+  const firstDate = start.date > rangeStart ? start.date : rangeStart;
+  const results = [];
+  let date = firstDate;
+  while (date <= rangeEnd) {
+    const elapsedDays = daysBetween(start.date, date);
+    const occurs = elapsedDays >= 0 && (
+      (!event.recurrence_unit && elapsedDays === 0)
+      || (event.recurrence_unit === 'day' && elapsedDays % event.recurrence_interval === 0)
+      || (event.recurrence_unit === 'week' && elapsedDays % (7 * event.recurrence_interval) === 0)
+    );
+    if (occurs && (!event.recurrence_until || date <= event.recurrence_until)) {
+      const originalStartsAt = argentinaDateTime(date, start.time);
+      const exception = exceptions.find((item) => item.event_id === event.id && new Date(item.occurrence_starts_at).getTime() === new Date(originalStartsAt).getTime());
+      if (!exception?.cancelled) {
+        results.push({
+          id: event.id,
+          occurrenceKey: `${event.id}|${originalStartsAt}`,
+          title: event.title,
+          clientId: event.client_id || '',
+          startsAt: exception?.replacement_starts_at || originalStartsAt,
+          originalStartsAt,
+          durationMinutes: exception?.replacement_duration_minutes || event.duration_minutes,
+          notes: event.notes || '',
+          recurrenceUnit: event.recurrence_unit || '',
+          recurrenceInterval: event.recurrence_interval || null,
+          recurrenceUntil: event.recurrence_until || '',
+          userIds: users.filter((item) => item.event_id === event.id).map((item) => item.user_id)
+        });
+      }
+    }
+    if (!event.recurrence_unit && date >= start.date) break;
+    date = addDays(date, 1);
+  }
+  return results;
+}
+
 function publicUser(user) {
   return { id: user.id, email: user.email, name: user.name };
 }
@@ -754,6 +822,171 @@ async function handleApi(req, res, url) {
     }
     const updatedUser = { id: apiUser.id, email: apiUser.email, name: name || apiUser.name };
     return sendJson(res, 200, { user: publicUser(updatedUser) });
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/calendar') {
+    const rangeStart = String(url.searchParams.get('from') || '');
+    const rangeEnd = String(url.searchParams.get('to') || '');
+    if (!isDateString(rangeStart) || !isDateString(rangeEnd) || rangeEnd < rangeStart || daysBetween(rangeStart, rangeEnd) > 62) {
+      return sendError(res, 400, 'Rango de calendario invalido');
+    }
+    const [availability, availabilityExceptions, events, eventUsers, eventExceptions] = await Promise.all([
+      supabaseRest('/calendar_availability?select=id,user_id,weekday,start_time,end_time,valid_from,valid_to&order=start_time.asc'),
+      supabaseRest(`/calendar_availability_exceptions?select=id,user_id,exception_date,start_time,end_time,unavailable,note&exception_date=gte.${rangeStart}&exception_date=lte.${rangeEnd}`),
+      supabaseRest('/calendar_events?select=id,title,client_id,starts_at,duration_minutes,notes,recurrence_unit,recurrence_interval,recurrence_until'),
+      supabaseRest('/calendar_event_users?select=event_id,user_id'),
+      supabaseRest('/calendar_event_exceptions?select=id,event_id,occurrence_starts_at,replacement_starts_at,replacement_duration_minutes,cancelled')
+    ]);
+    const occurrences = events.flatMap((event) => expandCalendarEvent(event, rangeStart, rangeEnd, eventUsers, eventExceptions));
+    return sendJson(res, 200, {
+      availability: availability.map((item) => ({
+        id: item.id,
+        userId: item.user_id,
+        weekday: item.weekday,
+        startTime: String(item.start_time).slice(0, 5),
+        endTime: String(item.end_time).slice(0, 5),
+        validFrom: item.valid_from,
+        validTo: item.valid_to || ''
+      })),
+      availabilityExceptions: availabilityExceptions.map((item) => ({
+        id: item.id,
+        userId: item.user_id,
+        date: item.exception_date,
+        startTime: item.start_time ? String(item.start_time).slice(0, 5) : '',
+        endTime: item.end_time ? String(item.end_time).slice(0, 5) : '',
+        unavailable: item.unavailable,
+        note: item.note || ''
+      })),
+      events: occurrences.sort((a, b) => a.startsAt.localeCompare(b.startsAt))
+    });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/calendar/availability') {
+    const userId = String(body.userId || '');
+    const effectiveFrom = String(body.effectiveFrom || '');
+    const schedule = Array.isArray(body.schedule) ? body.schedule : [];
+    if (!userId || !isDateString(effectiveFrom)) return sendError(res, 400, 'Usuario y fecha de vigencia son obligatorios');
+    const normalized = schedule.map((item) => ({
+      weekday: Number(item.weekday),
+      startTime: String(item.startTime || '').slice(0, 5),
+      endTime: String(item.endTime || '').slice(0, 5)
+    }));
+    if (normalized.some((item) => !Number.isInteger(item.weekday) || item.weekday < 1 || item.weekday > 7 || !isTimeString(item.startTime) || !isTimeString(item.endTime) || item.endTime <= item.startTime)) {
+      return sendError(res, 400, 'Hay horarios de disponibilidad invalidos');
+    }
+    const existing = await supabaseRest(`/calendar_availability?select=id,valid_from,valid_to&user_id=eq.${encodeURIComponent(userId)}`);
+    const previousDate = addDays(effectiveFrom, -1);
+    for (const rule of existing) {
+      if (rule.valid_to && rule.valid_to < effectiveFrom) continue;
+      if (rule.valid_from >= effectiveFrom) {
+        await supabaseRest(`/calendar_availability?id=eq.${encodeURIComponent(rule.id)}`, { method: 'DELETE' });
+      } else {
+        await supabaseRest(`/calendar_availability?id=eq.${encodeURIComponent(rule.id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ valid_to: previousDate })
+        });
+      }
+    }
+    if (normalized.length) {
+      await supabaseRest('/calendar_availability', {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify(normalized.map((item) => ({
+          id: makeId('av'),
+          user_id: userId,
+          weekday: item.weekday,
+          start_time: item.startTime,
+          end_time: item.endTime,
+          valid_from: effectiveFrom,
+          created_by: apiUser.id
+        })))
+      });
+    }
+    return sendJson(res, 200, { saved: true });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/calendar/availability-exceptions') {
+    const userId = String(body.userId || '');
+    const date = String(body.date || '');
+    const unavailable = Boolean(body.unavailable);
+    const startTime = String(body.startTime || '').slice(0, 5);
+    const endTime = String(body.endTime || '').slice(0, 5);
+    if (!userId || !isDateString(date)) return sendError(res, 400, 'Usuario y fecha son obligatorios');
+    if (!unavailable && (!isTimeString(startTime) || !isTimeString(endTime) || endTime <= startTime)) {
+      return sendError(res, 400, 'El horario de excepcion es invalido');
+    }
+    await supabaseRest(`/calendar_availability_exceptions?user_id=eq.${encodeURIComponent(userId)}&exception_date=eq.${date}`, { method: 'DELETE' });
+    await supabaseRest('/calendar_availability_exceptions', {
+      method: 'POST',
+      headers: { Prefer: 'return=representation' },
+      body: JSON.stringify([{
+        id: makeId('avx'), user_id: userId, exception_date: date,
+        start_time: unavailable ? null : startTime, end_time: unavailable ? null : endTime,
+        unavailable, note: String(body.note || '').trim(), created_by: apiUser.id
+      }])
+    });
+    return sendJson(res, 201, { saved: true });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/calendar/events') {
+    const title = String(body.title || '').trim();
+    const date = String(body.date || '');
+    const time = String(body.time || '').slice(0, 5);
+    const durationMinutes = Number(body.durationMinutes);
+    const userIds = [...new Set(Array.isArray(body.userIds) ? body.userIds.map(String).filter(Boolean) : [])];
+    const recurrenceUnit = body.recurrenceUnit === 'day' || body.recurrenceUnit === 'week' ? body.recurrenceUnit : null;
+    const recurrenceInterval = recurrenceUnit ? Number(body.recurrenceInterval) : null;
+    const recurrenceUntil = recurrenceUnit && body.recurrenceUntil ? String(body.recurrenceUntil) : null;
+    if (!title || !isDateString(date) || !isTimeString(time)) return sendError(res, 400, 'Titulo, fecha y hora son obligatorios');
+    if (!Number.isInteger(durationMinutes) || durationMinutes < 5 || durationMinutes > 1440) return sendError(res, 400, 'La duracion es invalida');
+    if (!userIds.length) return sendError(res, 400, 'Selecciona al menos un usuario');
+    if (recurrenceUnit && (!Number.isInteger(recurrenceInterval) || recurrenceInterval < 1 || recurrenceInterval > 365)) return sendError(res, 400, 'La repeticion es invalida');
+    if (recurrenceUntil && (!isDateString(recurrenceUntil) || recurrenceUntil < date)) return sendError(res, 400, 'La fecha final de repeticion es invalida');
+    const event = {
+      id: makeId('evt'), title, clientId: String(body.clientId || ''), startsAt: argentinaDateTime(date, time),
+      durationMinutes, notes: String(body.notes || '').trim(), recurrenceUnit,
+      recurrenceInterval, recurrenceUntil, userIds
+    };
+    await supabaseRest('/calendar_events', {
+      method: 'POST',
+      headers: { Prefer: 'return=representation' },
+      body: JSON.stringify([{
+        id: event.id, title: event.title, client_id: event.clientId || null, starts_at: event.startsAt,
+        duration_minutes: event.durationMinutes, notes: event.notes, recurrence_unit: event.recurrenceUnit,
+        recurrence_interval: event.recurrenceInterval, recurrence_until: event.recurrenceUntil,
+        created_by: apiUser.id, updated_by: apiUser.id
+      }])
+    });
+    try {
+      await supabaseRest('/calendar_event_users', {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify(userIds.map((userId) => ({ event_id: event.id, user_id: userId })))
+      });
+    } catch (error) {
+      await supabaseRest(`/calendar_events?id=eq.${encodeURIComponent(event.id)}`, { method: 'DELETE' });
+      throw error;
+    }
+    return sendJson(res, 201, { event });
+  }
+
+  if (segments[0] === 'api' && segments[1] === 'calendar' && segments[2] === 'events' && segments[3]) {
+    const eventId = segments[3];
+    if (req.method === 'DELETE') {
+      if (body.scope === 'occurrence' && body.originalStartsAt) {
+        await supabaseRest('/calendar_event_exceptions?on_conflict=event_id,occurrence_starts_at', {
+          method: 'POST',
+          headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
+          body: JSON.stringify([{
+            id: makeId('evx'), event_id: eventId, occurrence_starts_at: body.originalStartsAt,
+            cancelled: true, created_by: apiUser.id
+          }])
+        });
+        return sendJson(res, 200, { cancelled: true });
+      }
+      await supabaseRest(`/calendar_events?id=eq.${encodeURIComponent(eventId)}`, { method: 'DELETE' });
+      return sendJson(res, 200, { deleted: true });
+    }
   }
 
   if (req.method === 'POST' && url.pathname === '/api/settings/client-statuses') {
@@ -1449,7 +1682,10 @@ async function serveStatic(req, res, url) {
     '/login': 'login.html',
     '/kanban': 'kanban.html',
     '/dashboard': 'dashboard.html',
-    '/configuracion': 'configuracion.html'
+    '/configuracion': 'configuracion.html',
+    '/tableros': 'tableros.html',
+    '/calendarios': 'calendarios.html',
+    '/usuarios': 'usuarios.html'
   }[url.pathname];
   const requestedPath = routeFile ? path.join(publicDir, routeFile) : path.join(publicDir, url.pathname);
   const normalizedPath = path.normalize(requestedPath);

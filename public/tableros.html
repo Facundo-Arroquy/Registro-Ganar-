@@ -3,30 +3,26 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Kanban | WIM</title>
+  <title>Tableros | WIM</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles/app.css">
 </head>
-<body data-page="kanban">
+<body data-page="tableros">
   <button class="sidebar-toggle" type="button" aria-label="Abrir menu">&#9776;</button>
   <div class="sidebar-overlay"></div>
   <aside data-sidebar></aside>
   <main>
-    <header>
-      <div class="board-title-container">
-        <div class="board-color-dot" id="current-board-color"></div>
-        <h1 class="board-title" id="current-board-title">Tablero</h1>
+    <div class="dashboard-view">
+      <div class="section-header">
+        <h1 style="font-size: 1.5rem; font-weight: 700;">Tableros</h1>
+        <button class="btn" type="button" id="new-board-btn">Nuevo Tablero</button>
       </div>
-      <div>
-        <button class="btn btn-secondary" type="button" data-open-settings>Configurar</button>
-        <button class="btn btn-secondary" type="button" data-open-column>Nueva Columna</button>
-      </div>
-    </header>
-    <div class="kanban-board" id="kanban-board"></div>
+      <div class="boards-grid" id="boards-grid"></div>
+    </div>
   </main>
   <div id="modal-root"></div>
-  <script type="module" src="/scripts/kanban.js"></script>
+  <script type="module" src="/scripts/tableros.js"></script>
 </body>
 </html>
