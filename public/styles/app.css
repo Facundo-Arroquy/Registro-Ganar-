@@ -131,7 +131,7 @@ aside {
 .user-list {
   list-style: none;
   margin-bottom: 20px;
-  max-height: 80px;
+  max-height: 200px;
   overflow-y: auto;
   min-height: 0;
 }

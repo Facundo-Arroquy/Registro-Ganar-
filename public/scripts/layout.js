@@ -4,7 +4,7 @@ import { escapeHtml, getInitials, setButtonLoading } from './utils.js';
 export function renderSidebar({ state, currentUser, activePage, onRefresh }) {
   const sidebar = document.querySelector('[data-sidebar]');
   sidebar.innerHTML = `
-    <a class="logo" href="/dashboard">Gemini CRM</a>
+    <a class="logo" href="/dashboard">WIM</a>
     <a class="nav-btn ${activePage === 'dashboard' ? 'active' : ''}" href="/dashboard">Dashboard</a>
 
     <div class="section-title">Tableros</div>
