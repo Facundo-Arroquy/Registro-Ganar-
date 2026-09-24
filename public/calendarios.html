@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Calendarios | WIM</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles/app.css">
+</head>
+<body data-page="calendarios">
+  <button class="sidebar-toggle" type="button" aria-label="Abrir menu">&#9776;</button>
+  <div class="sidebar-overlay"></div>
+  <aside data-sidebar></aside>
+  <main>
+    <div class="dashboard-view calendar-page">
+      <div class="section-header calendar-heading">
+        <div>
+          <h1>Calendarios</h1>
+          <p>Disponibilidad laboral y eventos del equipo.</p>
+        </div>
+        <div class="calendar-actions">
+          <button class="btn btn-secondary" type="button" id="availability-btn">Configurar horarios</button>
+          <button class="btn" type="button" id="new-event-btn">Nuevo evento</button>
+        </div>
+      </div>
+
+      <section class="calendar-toolbar" aria-label="Controles del calendario">
+        <div class="calendar-navigation">
+          <button class="btn btn-secondary btn-sm" type="button" id="previous-week" aria-label="Semana anterior">&larr;</button>
+          <button class="btn btn-secondary btn-sm" type="button" id="today-week">Hoy</button>
+          <button class="btn btn-secondary btn-sm" type="button" id="next-week" aria-label="Semana siguiente">&rarr;</button>
+          <strong id="week-label"></strong>
+        </div>
+        <details class="calendar-user-filter">
+          <summary id="user-filter-label">Usuarios</summary>
+          <div class="calendar-filter-menu" id="user-filter-menu"></div>
+        </details>
+      </section>
+
+      <div class="calendar-legend" id="calendar-legend"></div>
+      <div class="calendar-scroll">
+        <div class="week-calendar" id="week-calendar" aria-live="polite"></div>
+      </div>
+    </div>
+  </main>
+  <div id="modal-root"></div>
+  <script type="module" src="/scripts/calendarios.js"></script>
+</body>
+</html>

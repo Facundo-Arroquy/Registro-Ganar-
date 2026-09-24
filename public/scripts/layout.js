@@ -8,6 +8,7 @@ export function renderSidebar({ state, currentUser, activePage, onRefresh }) {
     <a class="nav-btn ${activePage === 'dashboard' ? 'active' : ''}" href="/dashboard">Dashboard</a>
 
     <a class="nav-btn ${activePage === 'tableros' ? 'active' : ''}" href="/tableros">Tableros</a>
+    <a class="nav-btn ${activePage === 'calendarios' ? 'active' : ''}" href="/calendarios">Calendarios</a>
     <a class="nav-btn ${activePage === 'usuarios' ? 'active' : ''}" href="/usuarios">Usuarios</a>
 
     <div class="sidebar-settings">
