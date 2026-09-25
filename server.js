@@ -1830,6 +1830,7 @@ async function serveStatic(req, res, url) {
     '/calendarios': 'calendarios.html',
     '/templates': 'templates.html',
     '/weekly': 'weekly.html',
+    '/propuesta': 'propuesta.html',
     '/usuarios': 'usuarios.html'
   }[url.pathname];
   const requestedPath = routeFile ? path.join(publicDir, routeFile) : path.join(publicDir, url.pathname);

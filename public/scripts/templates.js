@@ -39,6 +39,12 @@ function renderTemplatesGrid() {
       <p class="template-card-desc">Presentacion semanal con metricas de clientes, reuniones y graficos de estado.</p>
       <button class="btn" type="button" id="create-weekly-btn">Crear nueva weekly</button>
     </div>
+    <div class="template-card">
+      <div class="template-card-icon">&#128176;</div>
+      <h3 class="template-card-title">Propuesta Comercial</h3>
+      <p class="template-card-desc">Propuesta editable con productos, precios, moneda y exportacion a PDF.</p>
+      <a class="btn" href="/propuesta">Crear propuesta</a>
+    </div>
   `;
 
   document.querySelector('#create-weekly-btn').addEventListener('click', createNewWeekly);

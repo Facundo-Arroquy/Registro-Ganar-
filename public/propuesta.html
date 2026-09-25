@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Propuesta Comercial | WIM</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles/app.css">
+  <style>
+    .proposal-card {
+      width: 900px;
+      max-width: 100%;
+      min-height: 1100px;
+      background: linear-gradient(135deg, #020024 0%, #090979 45%, #00d4ff 100%);
+      padding: 50px;
+      box-sizing: border-box;
+      border-radius: 12px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      position: relative;
+      margin: 0 auto;
+    }
+    .proposal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 2px solid rgba(255, 255, 255, 0.3);
+      padding-bottom: 20px;
+    }
+    .proposal-brand { font-size: 2rem; font-weight: bold; color: white; }
+    .proposal-brand span { color: #00d4ff; font-size: 0.9rem; display: block; font-weight: normal; }
+    .proposal-title { text-align: right; }
+    .proposal-title h1 { margin: 0; color: #ffcc00; font-size: 2.2rem; text-transform: uppercase; }
+    .proposal-client-box {
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(5px);
+      padding: 20px;
+      border-radius: 8px;
+      margin: 25px 0;
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 20px;
+    }
+    .proposal-field { display: flex; flex-direction: column; gap: 5px; }
+    .proposal-field label { font-size: 0.85rem; color: #00d4ff; font-weight: bold; }
+    .proposal-card input,
+    .proposal-card select,
+    .proposal-card textarea {
+      background: rgba(255, 255, 255, 0.15);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      color: white;
+      padding: 8px 12px;
+      border-radius: 5px;
+      font-size: 1rem;
+      outline: none;
+    }
+    .proposal-card input::placeholder,
+    .proposal-card textarea::placeholder { color: #ccc; }
+    .proposal-card option { background: #090979; color: white; }
+    .items-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    .items-table th { background: rgba(0, 0, 0, 0.4); color: #00d4ff; text-align: left; padding: 12px; font-size: 0.9rem; }
+    .items-table td { padding: 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.1); vertical-align: top; }
+    .item-title-input { font-weight: bold; width: 95%; margin-bottom: 5px; }
+    .item-desc-input { width: 95%; height: 45px; font-size: 0.85rem; resize: vertical; }
+    .item-price-input { width: 100px; text-align: right; }
+    .totals-box {
+      align-self: flex-end;
+      width: 320px;
+      background: rgba(255, 255, 255, 0.1);
+      padding: 20px;
+      border-radius: 8px;
+      margin-top: 20px;
+    }
+    .total-row { display: flex; justify-content: space-between; padding: 8px 0; font-size: 1.1rem; color: white; }
+    .total-row.final { border-top: 2px solid #00d4ff; font-size: 1.4rem; font-weight: bold; color: #ffcc00; }
+    .proposal-controls {
+      width: 900px;
+      max-width: 100%;
+      margin: 20px auto 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--bg-sidebar);
+      border: 1px solid var(--border-color);
+      padding: 15px 25px;
+      border-radius: 8px;
+      box-sizing: border-box;
+    }
+    .proposal-controls .btn-prop { padding: 10px 18px; cursor: pointer; border: none; border-radius: 5px; font-weight: bold; font-size: 0.9rem; }
+    .btn-prop-save { background: #28a745; color: white; }
+    .btn-prop-pdf { background: #ffcc00; color: #000; }
+    .btn-prop-add { background: #00d4ff; color: #000; }
+    .btn-prop-del { background: #dc3545; color: white; padding: 5px 10px; font-size: 0.8rem; border: none; border-radius: 4px; cursor: pointer; }
+    .proposal-saved-list {
+      width: 900px;
+      max-width: 100%;
+      margin: 20px auto 0;
+      background: var(--bg-sidebar);
+      border: 1px solid var(--border-color);
+      padding: 20px;
+      border-radius: 8px;
+      box-sizing: border-box;
+    }
+    .proposal-saved-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--bg-card);
+      padding: 10px 15px;
+      border-radius: 5px;
+      margin-top: 10px;
+    }
+    .proposal-saved-item button { margin-left: 8px; }
+    .proposal-page { padding: 20px 24px 40px; }
+
+    @media print {
+      body { background: none; overflow: visible; height: auto; }
+      [data-sidebar], .sidebar-toggle, .sidebar-overlay, .btn-back,
+      .proposal-controls, .proposal-saved-list, .btn-prop-del, .no-print { display: none !important; }
+      main { width: 100%; margin: 0; padding: 0; overflow: visible; }
+      .proposal-card {
+        box-shadow: none; width: 100%; min-height: 100vh;
+        border-radius: 0; padding: 40px;
+        -webkit-print-color-adjust: exact; print-color-adjust: exact;
+      }
+      .proposal-card input, .proposal-card select, .proposal-card textarea {
+        border: none !important; background: transparent !important; color: white !important; appearance: none;
+      }
+    }
+
+    @media (max-width: 780px) {
+      .proposal-card { padding: 20px; }
+      .proposal-client-box { grid-template-columns: 1fr; }
+      .proposal-header { flex-direction: column; text-align: center; gap: 10px; }
+      .proposal-title { text-align: center; }
+      .proposal-title h1 { font-size: 1.5rem; }
+      .totals-box { width: 100%; }
+    }
+  </style>
+</head>
+<body data-page="propuesta">
+  <button class="sidebar-toggle" type="button" aria-label="Abrir menu">&#9776;</button>
+  <div class="sidebar-overlay"></div>
+  <aside data-sidebar></aside>
+  <main>
+    <div class="proposal-page">
+      <!-- Propuesta Card -->
+      <div class="proposal-card" id="proposalCard">
+        <div>
+          <div class="proposal-header">
+            <div class="proposal-brand">WIM<span>win in marketplace.</span></div>
+            <div class="proposal-title">
+              <h1>Propuesta Comercial</h1>
+              <input type="date" id="propDate" style="text-align: right;">
+            </div>
+          </div>
+          <div class="proposal-client-box">
+            <div class="proposal-field">
+              <label>CLIENTE / EMPRESA DESTINATARIA</label>
+              <input type="text" id="clientName" placeholder="Nombre de la empresa o cliente...">
+            </div>
+            <div class="proposal-field">
+              <label>MONEDA Y TIPO DE CAMBIO</label>
+              <div style="display: flex; gap: 10px;">
+                <select id="currencySelect"><option value="USD">USD ($)</option><option value="ARS">ARS ($)</option></select>
+                <input type="number" id="dollarRate" placeholder="Cotiz. USD" value="1300" style="width: 90px;">
+              </div>
+            </div>
+          </div>
+          <table class="items-table">
+            <thead>
+              <tr>
+                <th style="width: 60%;">Producto / Servicio</th>
+                <th style="width: 30%;">Precio Unitario</th>
+                <th class="no-print" style="width: 10%;">Accion</th>
+              </tr>
+            </thead>
+            <tbody id="itemsContainer"></tbody>
+          </table>
+          <div class="no-print" style="margin-top: 15px;">
+            <button class="btn-prop btn-prop-add" type="button" id="add-item-btn">+ Agregar Producto / Servicio</button>
+          </div>
+        </div>
+        <div class="totals-box">
+          <div class="total-row"><span>Subtotal:</span><span id="subtotalVal">$0</span></div>
+          <div class="total-row" id="equivRow" style="font-size: 0.85rem; color: #ccc;"><span>Equiv. Dolar:</span><span id="equivVal">$0</span></div>
+          <div class="total-row final"><span>TOTAL:</span><span id="totalVal">$0</span></div>
+        </div>
+      </div>
+
+      <!-- Controls -->
+      <div class="proposal-controls no-print">
+        <button class="btn-prop btn-prop-save" type="button" id="save-proposal-btn">Guardar Propuesta</button>
+        <button class="btn-prop btn-prop-pdf" type="button" id="pdf-proposal-btn">Descargar en PDF</button>
+      </div>
+
+      <!-- Saved proposals -->
+      <div class="proposal-saved-list no-print">
+        <h3 style="margin-top: 0; color: #00d4ff;">Propuestas Guardadas</h3>
+        <div id="savedContainer">
+          <p style="color: var(--text-muted); font-size: 0.9rem;">No hay propuestas guardadas en el historial local.</p>
+        </div>
+      </div>
+    </div>
+  </main>
+  <div id="modal-root"></div>
+  <script type="module" src="/scripts/propuesta.js"></script>
+</body>
+</html>
