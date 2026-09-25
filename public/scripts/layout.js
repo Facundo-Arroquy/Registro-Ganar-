@@ -9,6 +9,7 @@ export function renderSidebar({ state, currentUser, activePage, onRefresh }) {
 
     <a class="nav-btn ${activePage === 'tableros' ? 'active' : ''}" href="/tableros">Tableros</a>
     <a class="nav-btn ${activePage === 'calendarios' ? 'active' : ''}" href="/calendarios">Calendarios</a>
+    <a class="nav-btn ${activePage === 'templates' ? 'active' : ''}" href="/templates">Templates</a>
     <a class="nav-btn ${activePage === 'usuarios' ? 'active' : ''}" href="/usuarios">Usuarios</a>
 
     <div class="sidebar-settings">
@@ -31,6 +32,9 @@ export function renderSidebar({ state, currentUser, activePage, onRefresh }) {
   });
 
   sidebar.querySelector('[data-open-profile]').addEventListener('click', () => openProfileModal({ currentUser, onRefresh }));
+
+  // Inject back button in main content area
+  injectBackButton();
 
   initSidebarToggle();
 }
@@ -66,6 +70,23 @@ function initSidebarToggle() {
   });
 }
 
+function injectBackButton() {
+  // Don't add on dashboard (home) or weekly (has its own back btn) or if already injected
+  const page = document.body.dataset.page;
+  if (page === 'dashboard' || page === 'weekly') return;
+  if (document.querySelector('.btn-back')) return;
+
+  const main = document.querySelector('main');
+  if (!main) return;
+
+  const btn = document.createElement('button');
+  btn.className = 'btn-back';
+  btn.type = 'button';
+  btn.innerHTML = '&larr; Atras';
+  btn.addEventListener('click', () => history.back());
+  main.prepend(btn);
+}
+
 async function deleteBoard({ state, currentUser, boardId, onRefresh, button }) {
   if (state.boards.length <= 1) {
     alert('Debe conservarse al menos un tablero.');
@@ -96,7 +117,8 @@ async function deleteBoard({ state, currentUser, boardId, onRefresh, button }) {
 export function openUserSummaryModal({ state, userId }) {
   const user = state.users.find((item) => item.id === userId);
   if (!user) return;
-  const clients = state.clients.filter((client) => client.ownerId === user.id);
+  const allClients = state.clients.filter((client) => client.ownerId === user.id);
+  const activeClients = allClients.filter((client) => (client.status || '') === 'Plan Activo');
 
   openModal(`
     <div class="modal-overlay">
@@ -106,8 +128,8 @@ export function openUserSummaryModal({ state, userId }) {
           <button class="btn-icon" type="button" data-close-modal>Cerrar</button>
         </div>
         <div class="stat-card" style="margin-bottom: 16px;">
-          <h3>Clientes a cargo</h3>
-          <div class="value">${clients.length}</div>
+          <h3>Clientes activos</h3>
+          <div class="value">${activeClients.length}</div>
         </div>
         <table class="table">
           <thead>
@@ -119,16 +141,16 @@ export function openUserSummaryModal({ state, userId }) {
             </tr>
           </thead>
           <tbody>
-            ${clients.length ? clients.map((client) => `
+            ${activeClients.length ? activeClients.map((client) => `
               <tr>
                 <td><strong>${escapeHtml(client.name)}</strong></td>
                 <td>${escapeHtml(client.company)}</td>
                 <td>${client.complexity ? complexityBadge(state, client.complexity) : '<span style="color: var(--text-muted);">-</span>'}</td>
-                <td>${statusBadge(state, client.status || 'Activo')}</td>
+                <td>${statusBadge(state, client.status || 'Plan Activo')}</td>
               </tr>
             `).join('') : `
               <tr>
-                <td colspan="4" style="color: var(--text-muted);">Sin clientes asignados</td>
+                <td colspan="4" style="color: var(--text-muted);">Sin clientes activos</td>
               </tr>
             `}
           </tbody>
