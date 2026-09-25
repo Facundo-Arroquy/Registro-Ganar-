@@ -1673,6 +1673,149 @@ async function handleApi(req, res, url) {
     }
   }
 
+  // --- Client Monthly Metrics API ---
+
+  if (req.method === 'GET' && url.pathname === '/api/client-monthly-metrics') {
+    const clientId = url.searchParams.get('clientId');
+    const year = url.searchParams.get('year');
+    let filter = '';
+    if (clientId) filter += `&client_id=eq.${encodeURIComponent(clientId)}`;
+    if (year) filter += `&year=eq.${encodeURIComponent(year)}`;
+    const rows = await supabaseRest(`/client_monthly_metrics?select=id,client_id,year,month,metric_type,value&order=year.asc,month.asc${filter}`);
+    return sendJson(res, 200, { metrics: rows.map(r => ({ id: r.id, clientId: r.client_id, year: r.year, month: r.month, metricType: r.metric_type, value: r.value })) });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/client-monthly-metrics') {
+    const { clientId, year, month, metrics } = body;
+    if (!clientId || !year || !month || !Array.isArray(metrics)) return sendError(res, 400, 'clientId, year, month y metrics son requeridos');
+    // Delete existing for this client/year/month, then insert
+    await supabaseRest(`/client_monthly_metrics?client_id=eq.${encodeURIComponent(clientId)}&year=eq.${year}&month=eq.${month}`, { method: 'DELETE' });
+    const rows = metrics.filter(m => m.value != null).map(m => ({
+      id: makeId('cmm'), client_id: clientId, year, month, metric_type: m.metricType, value: m.value
+    }));
+    if (rows.length) {
+      await supabaseRest('/client_monthly_metrics', { method: 'POST', body: JSON.stringify(rows) });
+    }
+    return sendJson(res, 200, { ok: true });
+  }
+
+  // --- Weekly Reports API ---
+
+  if (req.method === 'GET' && url.pathname === '/api/weekly-reports') {
+    const rows = await supabaseRest('/weekly_reports?select=id,week_label,status,created_at,created_by&order=created_at.desc');
+    return sendJson(res, 200, { reports: rows.map(r => ({ id: r.id, weekLabel: r.week_label, status: r.status, createdAt: r.created_at, createdBy: r.created_by })) });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/weekly-reports') {
+    const weekLabel = String(body.weekLabel || '').trim();
+    if (!weekLabel) return sendError(res, 400, 'weekLabel es requerido');
+    const id = makeId('wr');
+    const daysElapsed = Number(body.daysElapsed) || 25;
+    await supabaseRest('/weekly_reports', {
+      method: 'POST',
+      body: JSON.stringify({ id, week_label: weekLabel, days_elapsed: daysElapsed, created_by: apiUser.id })
+    });
+    return sendJson(res, 201, { report: { id, weekLabel, status: 'draft', daysElapsed, createdBy: apiUser.id } });
+  }
+
+  if (segments[1] === 'weekly-reports' && segments[2] && !segments[3]) {
+    const reportId = segments[2];
+
+    if (req.method === 'GET') {
+      const reports = await supabaseRest(`/weekly_reports?id=eq.${encodeURIComponent(reportId)}`);
+      if (!reports.length) return sendError(res, 404, 'Report no encontrado');
+      const report = reports[0];
+      const clientData = await supabaseRest(`/weekly_client_data?weekly_report_id=eq.${encodeURIComponent(reportId)}`);
+
+      // Derive week range from weekLabel (format: "DD/MM - DD/MM" or "DD/MM/YYYY - DD/MM/YYYY")
+      let calendarEvents = [];
+      try {
+        const labelParts = (report.week_label || '').split('-').map(s => s.trim());
+        if (labelParts.length === 2) {
+          const parsePart = (part) => {
+            const nums = part.split('/').map(Number);
+            if (nums.length === 3) return `${nums[2]}-${String(nums[1]).padStart(2, '0')}-${String(nums[0]).padStart(2, '0')}`;
+            if (nums.length === 2) {
+              const year = new Date().getFullYear();
+              return `${year}-${String(nums[1]).padStart(2, '0')}-${String(nums[0]).padStart(2, '0')}`;
+            }
+            return null;
+          };
+          const rangeStart = parsePart(labelParts[0]);
+          const rangeEnd = parsePart(labelParts[1]);
+          if (rangeStart && rangeEnd && isDateString(rangeStart) && isDateString(rangeEnd)) {
+            const [events, eventUsers, eventExceptions] = await Promise.all([
+              supabaseRest('/calendar_events?select=id,title,client_id,starts_at,duration_minutes,notes,recurrence_unit,recurrence_interval,recurrence_until'),
+              supabaseRest('/calendar_event_users?select=event_id,user_id'),
+              supabaseRest('/calendar_event_exceptions?select=id,event_id,occurrence_starts_at,replacement_starts_at,replacement_duration_minutes,cancelled')
+            ]);
+            calendarEvents = events.flatMap(event => expandCalendarEvent(event, rangeStart, rangeEnd, eventUsers, eventExceptions))
+              .sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+          }
+        }
+      } catch { /* ignore calendar errors */ }
+
+      return sendJson(res, 200, {
+        report: {
+          id: report.id, weekLabel: report.week_label, status: report.status,
+          daysElapsed: report.days_elapsed, notes: report.notes, meetings: report.meetings,
+          createdAt: report.created_at, createdBy: report.created_by
+        },
+        clientData: clientData.map(d => ({
+          id: d.id, clientId: d.client_id, metricType: d.metric_type,
+          currentValue: d.current_value, previousValue: d.previous_value, ytdValue: d.ytd_value
+        })),
+        calendarEvents
+      });
+    }
+
+    if (req.method === 'PATCH') {
+      const reports = await supabaseRest(`/weekly_reports?id=eq.${encodeURIComponent(reportId)}`);
+      if (!reports.length) return sendError(res, 404, 'Report no encontrado');
+      if (reports[0].status === 'final') return sendError(res, 400, 'No se puede editar un report finalizado');
+      const updates = { updated_at: new Date().toISOString() };
+      if (body.daysElapsed !== undefined) updates.days_elapsed = Number(body.daysElapsed);
+      if (body.notes !== undefined) updates.notes = body.notes;
+      if (body.meetings !== undefined) updates.meetings = body.meetings;
+      await supabaseRest(`/weekly_reports?id=eq.${encodeURIComponent(reportId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(updates)
+      });
+      if (Array.isArray(body.clientData)) {
+        await supabaseRest(`/weekly_client_data?weekly_report_id=eq.${encodeURIComponent(reportId)}`, { method: 'DELETE' });
+        const rows = body.clientData.filter(d => d.currentValue != null || d.previousValue != null || d.ytdValue != null).map(d => ({
+          id: d.id || makeId('wcd'), weekly_report_id: reportId, client_id: d.clientId,
+          metric_type: d.metricType, current_value: d.currentValue ?? null,
+          previous_value: d.previousValue ?? null, ytd_value: d.ytdValue ?? null
+        }));
+        if (rows.length) {
+          await supabaseRest('/weekly_client_data', {
+            method: 'POST',
+            body: JSON.stringify(rows)
+          });
+        }
+      }
+      return sendJson(res, 200, { ok: true });
+    }
+
+    if (req.method === 'DELETE') {
+      await supabaseRest(`/weekly_reports?id=eq.${encodeURIComponent(reportId)}`, { method: 'DELETE' });
+      return sendJson(res, 200, { ok: true });
+    }
+  }
+
+  if (req.method === 'POST' && segments[1] === 'weekly-reports' && segments[2] && segments[3] === 'finalize') {
+    const reportId = segments[2];
+    const reports = await supabaseRest(`/weekly_reports?id=eq.${encodeURIComponent(reportId)}`);
+    if (!reports.length) return sendError(res, 404, 'Report no encontrado');
+    if (reports[0].status === 'final') return sendError(res, 400, 'Ya esta finalizado');
+    await supabaseRest(`/weekly_reports?id=eq.${encodeURIComponent(reportId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'final', updated_at: new Date().toISOString() })
+    });
+    return sendJson(res, 200, { ok: true });
+  }
+
   sendError(res, 404, 'Ruta no encontrada');
 }
 
@@ -1685,6 +1828,8 @@ async function serveStatic(req, res, url) {
     '/configuracion': 'configuracion.html',
     '/tableros': 'tableros.html',
     '/calendarios': 'calendarios.html',
+    '/templates': 'templates.html',
+    '/weekly': 'weekly.html',
     '/usuarios': 'usuarios.html'
   }[url.pathname];
   const requestedPath = routeFile ? path.join(publicDir, routeFile) : path.join(publicDir, url.pathname);
