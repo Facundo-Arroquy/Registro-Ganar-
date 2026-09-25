@@ -2022,6 +2022,11 @@ header {
   color: white;
 }
 
+.weekly-cover-logo-img {
+  max-height: 120px;
+  border-radius: 10px;
+}
+
 .weekly-cover-title {
   font-size: 3rem;
   font-weight: 700;

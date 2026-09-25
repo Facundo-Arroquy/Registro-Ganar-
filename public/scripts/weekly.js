@@ -291,8 +291,7 @@ function renderCoverSlide(editable) {
   return `
     <div class="weekly-slide weekly-slide-cover">
       <div class="weekly-cover-logos">
-        <div class="weekly-cover-logo-box">Klear</div>
-        <div class="weekly-cover-logo-box">WIM win in market place.</div>
+        <img src="/images/logo-wim.jpeg" alt="WIM" class="weekly-cover-logo-img">
       </div>
       <h1 class="weekly-cover-title">weekly</h1>
       <div class="weekly-cover-date">
