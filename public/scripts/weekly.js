@@ -1,4 +1,4 @@
-import { api, requireSession } from './api.js?v=weekly-final';
+import { api, requireSession } from './api.js?v=weekly-meetings';
 import { loadAppState, refreshAppState } from './app-state.js';
 import { renderSidebar } from './layout.js';
 import { escapeHtml } from './utils.js';
@@ -384,6 +384,7 @@ function renderMeetingsSlide() {
 
   // Build a map of calendar events by day+hour
   const eventMap = {};
+  const eventClientsBySlot = {};
   const allClients = state.clients || [];
   calendarEvents.forEach(evt => {
     const d = new Date(evt.startsAt);
@@ -395,6 +396,21 @@ function renderMeetingsSlide() {
     const client = allClients.find(c => c.id === evt.clientId);
     const label = evt.title + (client ? ` (${client.company || client.name})` : '');
     eventMap[key] = eventMap[key] ? eventMap[key] + '\n' + label : label;
+    if (!eventClientsBySlot[key]) eventClientsBySlot[key] = new Set();
+    if (evt.clientId) eventClientsBySlot[key].add(String(evt.clientId));
+  });
+
+  getFilteredClients().forEach((client) => {
+    const meetingDay = Number(client.meetingDay);
+    const meetingTime = String(client.meetingTime || '').slice(0, 5);
+    if (!Number.isInteger(meetingDay) || meetingDay < 1 || meetingDay > 5 || !/^\d{2}:\d{2}$/.test(meetingTime)) return;
+    const hour = `${meetingTime.slice(0, 2)}:00`;
+    if (!hours.includes(hour)) return;
+    const key = `${days[meetingDay - 1].toLowerCase()}_${hour.replace(':', '')}`;
+    if (eventClientsBySlot[key]?.has(String(client.id))) return;
+    const frequency = client.meetingFrequency ? ` · cada ${client.meetingFrequency} días` : '';
+    const label = `Reunión habitual ${meetingTime} (${client.company || client.name})${frequency}`;
+    eventMap[key] = eventMap[key] ? `${eventMap[key]}\n${label}` : label;
   });
 
   return `
