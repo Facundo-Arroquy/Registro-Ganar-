@@ -1,4 +1,4 @@
-import { api, requireSession } from './api.js?v=weekly-6m';
+import { api, requireSession } from './api.js?v=weekly-final';
 import { loadAppState, refreshAppState } from './app-state.js';
 import { renderSidebar } from './layout.js';
 import { escapeHtml } from './utils.js';
@@ -27,7 +27,8 @@ async function loadReport() {
   report = data.report;
   clientData = data.clientData || [];
   clientSummaries = data.clientSummaries || [];
-  calendarEvents = data.calendarEvents || [];
+  const reportClientIds = new Set((report.meetings?.selectedClients || []).map(String));
+  calendarEvents = (data.calendarEvents || []).filter((event) => reportClientIds.has(String(event.clientId)));
 }
 
 function initSelectedClients() {
@@ -257,7 +258,7 @@ function renderSlides() {
     ${renderCoverSlide(editable)}
     ${renderClientUpdateSlide(sortedClients)}
     ${renderClientPlanSlide(clients, editable)}
-    ${renderMeetingsSlide(editable)}
+    ${renderMeetingsSlide()}
     ${renderClientStatusSlides(clients, editable)}
     ${clients.some(isFreeTrialClient) ? renderFreeTrialSlide(editable) : ''}
     ${renderNotesSlide(editable)}
@@ -376,8 +377,7 @@ function renderWeeklyBreakdown(clientId) {
 
 // --- Slide: Meetings (time-based grid with real calendar events) ---
 
-function renderMeetingsSlide(editable) {
-  const meetings = report.meetings || {};
+function renderMeetingsSlide() {
   const hours = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00'];
   const days = ['Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes'];
   const dayIndex = { 1: 0, 2: 1, 3: 2, 4: 3, 5: 4 }; // ISO weekday to array index
@@ -414,12 +414,8 @@ function renderMeetingsSlide(editable) {
                 <td><strong>${hour}</strong></td>
                 ${days.map(day => {
                   const key = `${day.toLowerCase()}_${hour.replace(':', '')}`;
-                  const saved = meetings[key] || '';
                   const fromCalendar = eventMap[key] || '';
-                  const val = saved || fromCalendar;
-                  return `<td>${editable
-                    ? `<textarea data-meeting-cell="${key}" rows="2">${escapeHtml(val)}</textarea>`
-                    : `${val ? escapeHtml(val) : ''}`}</td>`;
+                  return `<td>${fromCalendar ? escapeHtml(fromCalendar) : ''}</td>`;
                 }).join('')}
               </tr>
             `).join('')}
