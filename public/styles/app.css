@@ -445,29 +445,6 @@ header {
   transition: border-color 0.2s, opacity 0.2s;
 }
 
-.timer-column {
-  border-color: rgba(56, 139, 253, 0.55);
-  box-shadow: inset 0 3px 0 var(--accent-blue);
-  background: linear-gradient(180deg, rgba(56, 139, 253, 0.08), var(--bg-column) 120px);
-}
-
-.timer-column .column-header {
-  background-color: rgba(56, 139, 253, 0.06);
-}
-
-.timer-column-badge {
-  display: inline-flex;
-  align-items: center;
-  border-radius: 999px;
-  padding: 2px 7px;
-  font-size: 0.68rem;
-  font-weight: 700;
-  background-color: rgba(56, 139, 253, 0.14);
-  color: var(--accent-blue-hover);
-  border: 1px solid rgba(56, 139, 253, 0.28);
-  white-space: nowrap;
-}
-
 .column.dragging {
   opacity: 0.4;
 }
@@ -631,6 +608,14 @@ header {
   color: var(--accent-blue-hover);
   border: 1px solid rgba(56, 139, 253, 0.2);
 }
+
+.card-timer { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; width: 100%; }
+.card-timer.running .time-badge { color: #56d364; border-color: rgba(63, 185, 80, 0.45); }
+.timer-action { padding: 3px 7px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: transparent; color: var(--text-main); cursor: pointer; font-size: 0.7rem; }
+.timer-action:hover { border-color: var(--accent-blue); color: var(--accent-blue); }
+.timer-action:disabled { opacity: 0.55; cursor: wait; }
+.timer-finish { color: var(--due-expired-text); }
+.timer-finished { color: var(--text-muted); font-size: 0.7rem; }
 
 .meeting-badge {
   background-color: rgba(163, 113, 247, 0.1);
