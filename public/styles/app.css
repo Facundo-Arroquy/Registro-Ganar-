@@ -2952,6 +2952,27 @@ header {
   white-space: nowrap;
 }
 
+.weekly-results-heading > span {
+  display: block;
+  margin-bottom: 5px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.weekly-results-heading .weekly-slide-title { margin-bottom: 18px; }
+
+.weekly-historical-metrics {
+  max-height: 75vh;
+  overflow: auto;
+}
+
+.weekly-historical-metrics table { min-width: 1050px; }
+.weekly-historical-metrics th,
+.weekly-historical-metrics td { white-space: nowrap; }
+
 .weekly-chart-empty {
   display: grid;
   min-height: 220px;

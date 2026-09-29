@@ -321,43 +321,43 @@ function renderClientUpdateSlide(clients) {
   `;
 }
 
-// --- Slide: Client Plan (editable metrics with rowspan) ---
+// --- Slide: Historical client metrics ---
 
 function renderClientPlanSlide(clients) {
-  const metricLabels = { revenue: 'Real ($)', units: 'Real (u)', asp: 'Real (ASP)' };
+  const metricLabels = { revenue: 'Facturación', units: 'Unidades', asp: 'ASP' };
   const metrics = ['revenue', 'units', 'asp'];
+  const monthLabels = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+  const referenceSummary = clientSummaries.find((item) => Array.isArray(item.monthlyHistory));
+  const periods = referenceSummary?.monthlyHistory || [];
+  const estimatedLabel = referenceSummary ? `Estimado ${monthLabels[referenceSummary.month - 1]}` : 'Estimado';
+  const metricValue = (summary, metric, period) => summary?.monthlyHistory?.find((item) => item.year === period.year && item.month === period.month)?.[metric] ?? null;
+  const estimatedValue = (summary, metric) => metric === 'revenue' ? summary?.estimatedRevenue : metric === 'units' ? summary?.estimatedUnits : summary?.estimatedAsp;
+  const formatValue = (value, metric) => value === null || value === undefined
+    ? '<span class="metric-empty">—</span>'
+    : `${metric === 'revenue' || metric === 'asp' ? '$ ' : ''}${Number(value).toLocaleString('es-AR', { maximumFractionDigits: 2 })}`;
 
   return `
     <div class="weekly-slide">
-      <h2 class="weekly-slide-title">Plan clientes Wim</h2>
-      <div class="weekly-content-box" style="overflow-y:auto;max-height:75vh;">
+      <div class="weekly-results-heading"><span>Resultados</span><h2 class="weekly-slide-title">Métricas históricas de Clientes</h2></div>
+      <div class="weekly-content-box weekly-historical-metrics">
         <table>
           <thead>
             <tr>
               <th>Cliente</th>
-              <th>Metrica</th>
-              <th>Mes Anterior</th>
-              <th>Mes Actual</th>
-              <th>Estimado Mes</th>
-              <th>YTD</th>
+              <th>Métrica</th>
+              ${periods.map((period) => `<th>${monthLabels[period.month - 1]} ${period.year}</th>`).join('')}
+              <th class="highlight-cell">${estimatedLabel}</th>
             </tr>
           </thead>
           <tbody>
             ${clients.map(c => metrics.map((metric, mi) => {
-              const d = clientData.find(x => String(x.clientId) === String(c.id) && x.metricType === metric);
-              const current = d?.currentValue ?? '';
-              const previous = d?.previousValue ?? '';
-              const ytd = d?.ytdValue ?? '';
-              const estimated = d?.estimatedValue ?? '';
-              const prefix = (metric === 'revenue' || metric === 'asp') ? '$' : '';
+              const summary = getClientSummary(c.id);
               return `
                 <tr>
                   ${mi === 0 ? `<td rowspan="3"><strong>${escapeHtml(c.company || c.name)}</strong>${renderWeeklyBreakdown(c.id)}</td>` : ''}
                   <td>${metricLabels[metric]}</td>
-                  <td>${previous !== '' ? prefix + Number(previous).toLocaleString('es-AR', { maximumFractionDigits: 0 }) : '-'}</td>
-                  <td>${current !== '' ? prefix + Number(current).toLocaleString('es-AR', { maximumFractionDigits: 0 }) : '-'}</td>
-                  <td class="highlight-cell" data-estimated-for="${c.id}-${metric}">${estimated !== '' ? prefix + Number(estimated).toLocaleString('es-AR') : '-'}</td>
-                  <td>${ytd !== '' ? prefix + Number(ytd).toLocaleString('es-AR', { maximumFractionDigits: 0 }) : '-'}</td>
+                  ${periods.map((period) => `<td>${formatValue(metricValue(summary, metric, period), metric)}</td>`).join('')}
+                  <td class="highlight-cell">${formatValue(estimatedValue(summary, metric), metric)}</td>
                 </tr>
               `;
             }).join('')).join('')}
