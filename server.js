@@ -169,6 +169,30 @@ function isDateString(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
 }
 
+function weeklyDateRange(label, createdAt) {
+  const fallbackDate = argentinaParts(createdAt).date;
+  const fallbackYear = Number(fallbackDate.slice(0, 4));
+  const parsePart = (part, defaultYear) => {
+    const nums = String(part || '').trim().split('/').map(Number);
+    if (![2, 3].includes(nums.length) || nums.some((value) => !Number.isInteger(value))) return null;
+    const [day, month, explicitYear] = nums;
+    const year = nums.length === 3 ? explicitYear : defaultYear;
+    const parsed = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const date = new Date(`${parsed}T12:00:00Z`);
+    return isDateString(parsed) && !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === parsed ? parsed : null;
+  };
+  const parts = String(label || '').split('-').map((part) => part.trim()).filter(Boolean);
+  if (parts.length === 2) {
+    const start = parsePart(parts[0], fallbackYear);
+    let end = parsePart(parts[1], fallbackYear);
+    if (start && end && end < start && parts[1].split('/').length === 2) end = parsePart(parts[1], fallbackYear + 1);
+    if (start && end && end >= start) return { start, end };
+  }
+  const anchor = parts.length === 1 ? parsePart(parts[0], fallbackYear) || fallbackDate : fallbackDate;
+  const start = addDays(anchor, 1 - isoWeekday(anchor));
+  return { start, end: addDays(start, 6) };
+}
+
 function isTimeString(value) {
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(String(value || ''));
 }
@@ -1977,32 +2001,18 @@ async function handleApi(req, res, url) {
       const reportMonth = Number(new Intl.DateTimeFormat('en', { timeZone: 'America/Argentina/Buenos_Aires', month: 'numeric' }).format(reportDate));
       const clientSummaries = await getClientPeriodSummaries(selectedClientIds, reportYear, reportMonth);
 
-      // Derive week range from weekLabel (format: "DD/MM - DD/MM" or "DD/MM/YYYY - DD/MM/YYYY")
       let calendarEvents = [];
       try {
-        const labelParts = (report.week_label || '').split('-').map(s => s.trim());
-        if (labelParts.length === 2) {
-          const parsePart = (part) => {
-            const nums = part.split('/').map(Number);
-            if (nums.length === 3) return `${nums[2]}-${String(nums[1]).padStart(2, '0')}-${String(nums[0]).padStart(2, '0')}`;
-            if (nums.length === 2) {
-              const year = new Date().getFullYear();
-              return `${year}-${String(nums[1]).padStart(2, '0')}-${String(nums[0]).padStart(2, '0')}`;
-            }
-            return null;
-          };
-          const rangeStart = parsePart(labelParts[0]);
-          const rangeEnd = parsePart(labelParts[1]);
-          if (rangeStart && rangeEnd && isDateString(rangeStart) && isDateString(rangeEnd)) {
+        const range = weeklyDateRange(report.week_label, report.created_at);
+        if (range) {
             const [events, eventUsers, eventExceptions] = await Promise.all([
               supabaseRest('/calendar_events?select=id,title,client_id,starts_at,duration_minutes,notes,recurrence_unit,recurrence_interval,recurrence_until'),
               supabaseRest('/calendar_event_users?select=event_id,user_id'),
               supabaseRest('/calendar_event_exceptions?select=id,event_id,occurrence_starts_at,replacement_starts_at,replacement_duration_minutes,cancelled')
             ]);
-            calendarEvents = events.flatMap(event => expandCalendarEvent(event, rangeStart, rangeEnd, eventUsers, eventExceptions))
+            calendarEvents = events.flatMap(event => expandCalendarEvent(event, range.start, range.end, eventUsers, eventExceptions))
               .filter((event) => selectedClientIds.includes(String(event.clientId)))
               .sort((a, b) => a.startsAt.localeCompare(b.startsAt));
-          }
         }
       } catch { /* ignore calendar errors */ }
 
