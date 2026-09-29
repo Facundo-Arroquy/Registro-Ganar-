@@ -1441,7 +1441,7 @@ async function handleApi(req, res, url) {
         }),
         supabaseRest('/weekly_reports?select=id,week_label,status,meetings,created_at,updated_at&order=created_at.desc'),
         supabaseRest(`/calendar_events?select=id,title,starts_at,duration_minutes,notes,recurrence_unit,recurrence_interval,recurrence_until&client_id=eq.${encodedClientId}&order=starts_at.desc`),
-        supabaseRest(`/cards?select=id,board_id,column_id,title,description,due_date,assigned_to,entered_column_at,updated_at&client_id=eq.${encodedClientId}&order=updated_at.desc`),
+        supabaseRest(`/cards?select=id,board_id,column_id,title,description,due_date,assigned_to,updated_at&client_id=eq.${encodedClientId}&order=updated_at.desc`),
         supabaseRest(`/client_comments?select=id,content,created_by,author_name,created_at,updated_at&client_id=eq.${encodedClientId}&order=created_at.desc`).catch((error) => {
           if (/client_comments|schema cache/i.test(error.message)) return [];
           throw error;
@@ -1480,8 +1480,7 @@ async function handleApi(req, res, url) {
         })),
         cards: cards.map((item) => ({
           id: item.id, boardId: item.board_id, columnId: item.column_id, title: item.title,
-          description: item.description || '', dueDate: item.due_date || '', assignedTo: item.assigned_to || '',
-          enteredColumnAt: item.entered_column_at
+          description: item.description || '', dueDate: item.due_date || '', assignedTo: item.assigned_to || ''
         }))
       });
     }
