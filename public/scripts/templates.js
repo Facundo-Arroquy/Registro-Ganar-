@@ -1,6 +1,6 @@
 import { api, requireSession } from './api.js';
 import { loadAppState, refreshAppState } from './app-state.js';
-import { renderSidebar } from './layout.js';
+import { openModal, renderSidebar } from './layout.js';
 import { escapeHtml } from './utils.js';
 
 const currentUser = requireSession();
@@ -56,21 +56,60 @@ async function createNewWeekly() {
   const month = String(now.getMonth() + 1).padStart(2, '0');
   const weekLabel = `${day}/${month}`;
 
-  const btn = document.querySelector('#create-weekly-btn');
-  btn.disabled = true;
-  btn.textContent = 'Creando...';
-
-  try {
-    const { report } = await api('/api/weekly-reports', {
-      method: 'POST',
-      body: JSON.stringify({ weekLabel })
+  const clients = [...(state.clients || [])].sort((a, b) => (a.company || a.name).localeCompare(b.company || b.name, 'es'));
+  const normalizeStatus = (value) => String(value || '').trim().toLowerCase().replaceAll(' ', '');
+  const isActive = (client) => ['activo', 'planactivo'].includes(normalizeStatus(client.status));
+  const isFreeTrial = (client) => ['freetrial'].includes(normalizeStatus(client.status));
+  const overlay = openModal(`
+    <div class="modal-overlay"><form class="modal weekly-create-modal">
+      <div class="modal-header">Crear nueva Weekly</div>
+      <div class="form-group"><label>Fecha / etiqueta</label><input class="form-control" id="weekly-label-input" value="${weekLabel}"></div>
+      <div class="form-group"><label>Clientes incluidos</label><p class="form-hint">Las métricas y el último comentario se completan automáticamente desde Clientes.</p>
+        <div class="weekly-selection-presets">
+          <button class="btn btn-secondary btn-sm" type="button" data-client-preset="active">Todos los activos</button>
+          <button class="btn btn-secondary btn-sm" type="button" data-client-preset="trial">Todos los FreeTrial</button>
+          <button class="btn btn-secondary btn-sm" type="button" data-client-preset="active-trial">Activos + FreeTrial</button>
+          <button class="btn btn-secondary btn-sm" type="button" data-client-preset="all">Todos</button>
+          <button class="btn btn-secondary btn-sm" type="button" data-client-preset="none">Limpiar</button>
+        </div>
+        <p class="weekly-selection-count" data-selection-count>0 clientes seleccionados</p>
+        <div class="weekly-create-clients">${clients.map((client) => `<label><input type="checkbox" data-weekly-client value="${escapeHtml(client.id)}"><span>${escapeHtml(client.company || client.name)}</span>${client.status ? `<small>${escapeHtml(client.status)}</small>` : ''}</label>`).join('')}</div>
+      </div>
+      <div class="modal-actions"><button class="btn btn-secondary" type="button" data-close-modal>Cancelar</button><button class="btn" type="submit">Crear Weekly</button></div>
+    </form></div>`);
+  const checkboxes = [...overlay.querySelectorAll('[data-weekly-client]')];
+  const updateCount = () => {
+    const count = checkboxes.filter((input) => input.checked).length;
+    overlay.querySelector('[data-selection-count]').textContent = `${count} ${count === 1 ? 'cliente seleccionado' : 'clientes seleccionados'}`;
+  };
+  checkboxes.forEach((input) => input.addEventListener('change', updateCount));
+  overlay.querySelectorAll('[data-client-preset]').forEach((button) => button.addEventListener('click', () => {
+    const preset = button.dataset.clientPreset;
+    checkboxes.forEach((input) => {
+      const client = clients.find((item) => item.id === input.value);
+      input.checked = preset === 'all'
+        || (preset === 'active' && isActive(client))
+        || (preset === 'trial' && isFreeTrial(client))
+        || (preset === 'active-trial' && (isActive(client) || isFreeTrial(client)));
     });
-    window.location.href = `/weekly?id=${report.id}`;
-  } catch (err) {
-    btn.disabled = false;
-    btn.textContent = 'Crear nueva weekly';
-    alert(err.message);
-  }
+    updateCount();
+  }));
+  overlay.querySelector('form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const clientIds = [...overlay.querySelectorAll('[data-weekly-client]:checked')].map((input) => input.value);
+    if (!clientIds.length) return alert('Selecciona al menos un cliente');
+    const submit = overlay.querySelector('button[type="submit"]');
+    submit.disabled = true;
+    submit.textContent = 'Creando...';
+    try {
+      const { report } = await api('/api/weekly-reports', { method: 'POST', body: JSON.stringify({ weekLabel: overlay.querySelector('#weekly-label-input').value.trim(), clientIds }) });
+      window.location.href = `/weekly?id=${report.id}`;
+    } catch (err) {
+      submit.disabled = false;
+      submit.textContent = 'Crear Weekly';
+      alert(err.message);
+    }
+  });
 }
 
 function renderWeeklyList() {

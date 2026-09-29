@@ -1,4 +1,4 @@
-import { api, requireSession } from './api.js';
+import { api, requireSession } from './api.js?v=weekly-meetings';
 import { loadAppState, refreshAppState } from './app-state.js';
 import { renderSidebar } from './layout.js';
 import { escapeHtml } from './utils.js';
@@ -10,6 +10,7 @@ if (!reportId) window.location.href = '/templates';
 let state;
 let report = null;
 let clientData = [];
+let clientSummaries = [];
 let calendarEvents = [];
 let selectedClientIds = new Set();
 let charts = [];
@@ -22,10 +23,12 @@ async function boot() {
 }
 
 async function loadReport() {
-  const data = await api(`/api/weekly-reports/${reportId}`);
+  const data = await api(`/api/weekly-reports/${reportId}?metricsWindow=6`);
   report = data.report;
   clientData = data.clientData || [];
-  calendarEvents = data.calendarEvents || [];
+  clientSummaries = data.clientSummaries || [];
+  const reportClientIds = new Set((report.meetings?.selectedClients || []).map(String));
+  calendarEvents = (data.calendarEvents || []).filter((event) => reportClientIds.has(String(event.clientId)));
 }
 
 function initSelectedClients() {
@@ -48,10 +51,17 @@ function getFilteredClients() {
   return (state.clients || []).filter(c => selectedClientIds.has(c.id));
 }
 
+function getClientSummary(clientId) {
+  return clientSummaries.find((item) => String(item.clientId) === String(clientId));
+}
+
+function isFreeTrialClient(client) {
+  return String(client?.status || '').trim().toLowerCase().replaceAll(' ', '') === 'freetrial';
+}
+
 function renderPage() {
   renderSidebar({ state, currentUser, activePage: 'templates', onRefresh: () => refreshAppState().then(s => { state = s; renderPage(); }) });
   renderToolbar();
-  renderClientFilter();
   renderSlides();
 }
 
@@ -69,7 +79,6 @@ function renderToolbar() {
     <div class="weekly-toolbar-actions">
       <button class="btn btn-secondary" type="button" id="export-pdf-btn">Exportar PDF</button>
       ${isEditable() ? `
-        <button class="btn btn-secondary" type="button" id="toggle-filter-btn">Filtrar Clientes</button>
         <button class="btn btn-secondary" type="button" id="save-draft-btn">Guardar Borrador</button>
         <button class="btn" type="button" id="finalize-btn">Guardado Final</button>
       ` : ''}
@@ -83,10 +92,6 @@ function renderToolbar() {
   if (isEditable()) {
     document.querySelector('#save-draft-btn').addEventListener('click', saveDraft);
     document.querySelector('#finalize-btn').addEventListener('click', finalize);
-    document.querySelector('#toggle-filter-btn').addEventListener('click', () => {
-      const panel = document.querySelector('#client-filter-panel');
-      if (panel) panel.classList.toggle('hidden');
-    });
   }
 }
 
@@ -119,7 +124,7 @@ function renderClientFilter() {
         <label class="weekly-filter-item">
           <input type="checkbox" data-filter-client="${c.id}" ${selectedClientIds.has(c.id) ? 'checked' : ''}>
           <span>${escapeHtml(c.company || c.name)}</span>
-          <small>${escapeHtml(c.status || '')}</small>
+          ${c.status ? renderConfiguredBadge('clientStatuses', c.status) : ''}
         </label>
       `).join('')}
     </div>
@@ -142,26 +147,6 @@ function renderClientFilter() {
 }
 
 // --- Save / Finalize ---
-
-function collectClientData() {
-  const result = [];
-  document.querySelectorAll('[data-client-metric]').forEach(input => {
-    const clientId = input.dataset.clientId;
-    const metricType = input.dataset.metricType;
-    const field = input.dataset.field;
-    const value = input.value.trim() === '' ? null : Number(input.value);
-    let existing = result.find(d => d.clientId === clientId && d.metricType === metricType);
-    if (!existing) {
-      const saved = clientData.find(d => d.clientId === clientId && d.metricType === metricType);
-      existing = { id: saved?.id || undefined, clientId, metricType, currentValue: null, previousValue: null, ytdValue: null };
-      result.push(existing);
-    }
-    if (field === 'current') existing.currentValue = value;
-    if (field === 'previous') existing.previousValue = value;
-    if (field === 'ytd') existing.ytdValue = value;
-  });
-  return result;
-}
 
 function collectNotes() {
   const notes = [];
@@ -230,8 +215,7 @@ async function saveDraft() {
       body: JSON.stringify({
         daysElapsed,
         notes: collectNotes(),
-        meetings,
-        clientData: collectClientData()
+        meetings
       })
     });
     await loadReport();
@@ -274,9 +258,9 @@ function renderSlides() {
     ${renderCoverSlide(editable)}
     ${renderClientUpdateSlide(sortedClients)}
     ${renderClientPlanSlide(clients, editable)}
-    ${renderMeetingsSlide(editable)}
+    ${renderMeetingsSlide()}
     ${renderClientStatusSlides(clients, editable)}
-    ${renderFreeTrialSlide(editable)}
+    ${clients.some(isFreeTrialClient) ? renderFreeTrialSlide(editable) : ''}
     ${renderNotesSlide(editable)}
     ${renderFinalSlide()}
   `;
@@ -298,9 +282,7 @@ function renderCoverSlide(editable) {
         <input type="text" class="date-input" value="${escapeHtml(report.weekLabel)}" ${editable ? '' : 'disabled'}>
       </div>
       <div class="weekly-cover-meta">
-        <span>Dias del mes transcurridos:</span>
-        <input type="number" id="days-elapsed" value="${report.daysElapsed}" ${editable ? '' : 'disabled'}>
-        <span>/ 30</span>
+        <span>Métricas sincronizadas desde Clientes</span>
       </div>
     </div>
   `;
@@ -329,7 +311,7 @@ function renderClientUpdateSlide(clients) {
                 <tr>
                   <td><strong>${escapeHtml(c.company || c.name)}</strong></td>
                   <td><span class="tag ${tagClass}">${escapeHtml(c.consultor || '-')}</span></td>
-                  <td>${escapeHtml(c.status || 'Activo')}</td>
+                  <td>${renderConfiguredBadge('clientStatuses', c.status || 'Activo')}</td>
                 </tr>
               `;
             }).join('')}
@@ -340,50 +322,43 @@ function renderClientUpdateSlide(clients) {
   `;
 }
 
-// --- Slide: Client Plan (editable metrics with rowspan) ---
+// --- Slide: Historical client metrics ---
 
-function renderClientPlanSlide(clients, editable) {
-  const metricLabels = { revenue: 'Real ($)', units: 'Real (u)', asp: 'Real (ASP)' };
+function renderClientPlanSlide(clients) {
+  const metricLabels = { revenue: 'Facturación', units: 'Unidades', asp: 'ASP' };
   const metrics = ['revenue', 'units', 'asp'];
+  const monthLabels = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+  const referenceSummary = clientSummaries.find((item) => Array.isArray(item.monthlyHistory));
+  const periods = referenceSummary?.monthlyHistory || [];
+  const estimatedLabel = referenceSummary ? `Estimado ${monthLabels[referenceSummary.month - 1]}` : 'Estimado';
+  const metricValue = (summary, metric, period) => summary?.monthlyHistory?.find((item) => item.year === period.year && item.month === period.month)?.[metric] ?? null;
+  const estimatedValue = (summary, metric) => metric === 'revenue' ? summary?.estimatedRevenue : metric === 'units' ? summary?.estimatedUnits : summary?.estimatedAsp;
+  const formatValue = (value, metric) => value === null || value === undefined
+    ? '<span class="metric-empty">—</span>'
+    : `${metric === 'revenue' || metric === 'asp' ? '$ ' : ''}${Number(value).toLocaleString('es-AR', { maximumFractionDigits: 2 })}`;
 
   return `
     <div class="weekly-slide">
-      <h2 class="weekly-slide-title">Plan clientes Wim</h2>
-      <div class="weekly-content-box" style="overflow-y:auto;max-height:75vh;">
+      <div class="weekly-results-heading"><span>Resultados</span><h2 class="weekly-slide-title">Métricas históricas de Clientes</h2></div>
+      <div class="weekly-content-box weekly-historical-metrics">
         <table>
           <thead>
             <tr>
               <th>Cliente</th>
-              <th>Metrica</th>
-              <th>Mes Anterior</th>
-              <th>Mes Actual</th>
-              <th>Estimado Mes</th>
-              <th>YTD</th>
+              <th>Métrica</th>
+              ${periods.map((period) => `<th>${monthLabels[period.month - 1]} ${period.year}</th>`).join('')}
+              <th class="highlight-cell">${estimatedLabel}</th>
             </tr>
           </thead>
           <tbody>
             ${clients.map(c => metrics.map((metric, mi) => {
-              const d = clientData.find(x => x.clientId === c.id && x.metricType === metric);
-              const current = d?.currentValue ?? '';
-              const previous = d?.previousValue ?? '';
-              const ytd = d?.ytdValue ?? '';
-              const days = report.daysElapsed || 25;
-              const estimated = current !== '' && days > 0 ? Math.round((Number(current) / days) * 30) : '';
-              const prefix = (metric === 'revenue' || metric === 'asp') ? '$' : '';
+              const summary = getClientSummary(c.id);
               return `
                 <tr>
-                  ${mi === 0 ? `<td rowspan="3"><strong>${escapeHtml(c.company || c.name)}</strong></td>` : ''}
+                  ${mi === 0 ? `<td rowspan="3"><strong>${escapeHtml(c.company || c.name)}</strong>${renderWeeklyBreakdown(c.id)}</td>` : ''}
                   <td>${metricLabels[metric]}</td>
-                  <td>${editable
-                    ? `<td class="editable-cell"><input data-client-metric data-client-id="${c.id}" data-metric-type="${metric}" data-field="previous" value="${previous}" step="any"></td>`
-                    : `<td>${previous !== '' ? prefix + Number(previous).toLocaleString('es-AR') : '-'}</td>`}
-                  <td class="editable-cell">${editable
-                    ? `<input data-client-metric data-client-id="${c.id}" data-metric-type="${metric}" data-field="current" value="${current}" step="any">`
-                    : `${current !== '' ? prefix + Number(current).toLocaleString('es-AR') : '-'}`}</td>
-                  <td class="highlight-cell" data-estimated-for="${c.id}-${metric}">${estimated !== '' ? prefix + Number(estimated).toLocaleString('es-AR') : '-'}</td>
-                  ${editable
-                    ? `<td class="editable-cell"><input data-client-metric data-client-id="${c.id}" data-metric-type="${metric}" data-field="ytd" value="${ytd}" step="any"></td>`
-                    : `<td>${ytd !== '' ? prefix + Number(ytd).toLocaleString('es-AR') : '-'}</td>`}
+                  ${periods.map((period) => `<td>${formatValue(metricValue(summary, metric, period), metric)}</td>`).join('')}
+                  <td class="highlight-cell">${formatValue(estimatedValue(summary, metric), metric)}</td>
                 </tr>
               `;
             }).join('')).join('')}
@@ -394,16 +369,22 @@ function renderClientPlanSlide(clients, editable) {
   `;
 }
 
+function renderWeeklyBreakdown(clientId) {
+  const weeks = getClientSummary(clientId)?.weeks || [];
+  if (!weeks.length) return '<small class="weekly-breakdown empty">Sin detalle semanal</small>';
+  return `<div class="weekly-breakdown">${weeks.map((week) => `<span>S${week.week}: $${Number(week.revenue).toLocaleString('es-AR', { maximumFractionDigits: 0 })} · ${Number(week.units).toLocaleString('es-AR')} u.</span>`).join('')}</div>`;
+}
+
 // --- Slide: Meetings (time-based grid with real calendar events) ---
 
-function renderMeetingsSlide(editable) {
-  const meetings = report.meetings || {};
+function renderMeetingsSlide() {
   const hours = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00'];
   const days = ['Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes'];
   const dayIndex = { 1: 0, 2: 1, 3: 2, 4: 3, 5: 4 }; // ISO weekday to array index
 
   // Build a map of calendar events by day+hour
   const eventMap = {};
+  const eventClientsBySlot = {};
   const allClients = state.clients || [];
   calendarEvents.forEach(evt => {
     const d = new Date(evt.startsAt);
@@ -415,6 +396,21 @@ function renderMeetingsSlide(editable) {
     const client = allClients.find(c => c.id === evt.clientId);
     const label = evt.title + (client ? ` (${client.company || client.name})` : '');
     eventMap[key] = eventMap[key] ? eventMap[key] + '\n' + label : label;
+    if (!eventClientsBySlot[key]) eventClientsBySlot[key] = new Set();
+    if (evt.clientId) eventClientsBySlot[key].add(String(evt.clientId));
+  });
+
+  getFilteredClients().forEach((client) => {
+    const meetingDay = Number(client.meetingDay);
+    const meetingTime = String(client.meetingTime || '').slice(0, 5);
+    if (!Number.isInteger(meetingDay) || meetingDay < 1 || meetingDay > 5 || !/^\d{2}:\d{2}$/.test(meetingTime)) return;
+    const hour = `${meetingTime.slice(0, 2)}:00`;
+    if (!hours.includes(hour)) return;
+    const key = `${days[meetingDay - 1].toLowerCase()}_${hour.replace(':', '')}`;
+    if (eventClientsBySlot[key]?.has(String(client.id))) return;
+    const frequency = client.meetingFrequency ? ` · cada ${client.meetingFrequency} días` : '';
+    const label = `Reunión habitual ${meetingTime} (${client.company || client.name})${frequency}`;
+    eventMap[key] = eventMap[key] ? `${eventMap[key]}\n${label}` : label;
   });
 
   return `
@@ -434,12 +430,8 @@ function renderMeetingsSlide(editable) {
                 <td><strong>${hour}</strong></td>
                 ${days.map(day => {
                   const key = `${day.toLowerCase()}_${hour.replace(':', '')}`;
-                  const saved = meetings[key] || '';
                   const fromCalendar = eventMap[key] || '';
-                  const val = saved || fromCalendar;
-                  return `<td>${editable
-                    ? `<textarea data-meeting-cell="${key}" rows="2">${escapeHtml(val)}</textarea>`
-                    : `${val ? escapeHtml(val) : ''}`}</td>`;
+                  return `<td>${fromCalendar ? escapeHtml(fromCalendar) : ''}</td>`;
                 }).join('')}
               </tr>
             `).join('')}
@@ -463,24 +455,18 @@ function renderClientStatusSlides(clients, editable) {
 
   const consultorNames = Object.keys(groups).sort();
   let html = '';
-  let groupNum = 1;
 
   consultorNames.forEach(consultor => {
     const group = groups[consultor];
-    // One separator per consultor group
-    html += `
-      <div class="weekly-slide weekly-slide-separator">
-        <h1>${groupNum} ${escapeHtml(consultor)}</h1>
-      </div>
-    `;
-    // One status slide per client within the group
     group.forEach(c => {
       const novedades = report.meetings?.clientNovedades?.[c.id] || [];
+      const sourceComment = getClientSummary(c.id)?.lastComment;
       html += `
         <div class="weekly-slide">
           <h2 class="weekly-slide-title">Estado Cliente | ${escapeHtml(c.company || c.name)} | ${escapeHtml(consultor)}</h2>
           <div class="weekly-content-box weekly-client-status-grid">
             <div class="weekly-client-novedades">
+              ${sourceComment ? `<div class="weekly-source-comment"><span>Último comentario de reunión</span><p>${escapeHtml(sourceComment.content)}</p><small>${escapeHtml(sourceComment.author_name || '')} · ${new Date(sourceComment.created_at).toLocaleDateString('es-AR')}</small></div>` : '<div class="weekly-source-comment empty"><span>Sin comentarios de reunión</span></div>'}
               ${editable ? `<button class="btn-slide btn-slide-add" type="button" data-add-novedad="${c.id}">+ Agregar Novedad</button>` : ''}
               <div data-client-novedades="${c.id}">
                 ${novedades.map(n => renderNovedadItem(n, editable)).join('')}
@@ -493,7 +479,6 @@ function renderClientStatusSlides(clients, editable) {
         </div>
       `;
     });
-    groupNum++;
   });
 
   return html;
@@ -614,32 +599,50 @@ function destroyCharts() {
   charts = [];
 }
 
+function getSettingColor(collection, name) {
+  const item = (state.settings?.[collection] || []).find((entry) => (typeof entry === 'string' ? entry : entry?.name) === name);
+  return typeof item === 'object' && /^#[0-9a-fA-F]{6}$/.test(item?.color || '') ? item.color : '#388bfd';
+}
+
+function renderConfiguredBadge(collection, name) {
+  return `<span class="status-badge custom-status" style="--status-color: ${escapeHtml(getSettingColor(collection, name))}">${escapeHtml(name)}</span>`;
+}
+
 function initCharts(clients) {
   clients.forEach(c => {
     const canvas = document.getElementById(`chart-${c.id}`);
     if (!canvas) return;
-
-    const revenue = clientData.find(x => x.clientId === c.id && x.metricType === 'revenue');
-    const units = clientData.find(x => x.clientId === c.id && x.metricType === 'units');
-
-    // Generate mock weekly labels and trend data based on current values
-    const weeks = Array.from({ length: 38 }, (_, i) => `Sem ${i + 1}`);
-    const currentRev = Number(revenue?.currentValue || 0);
-    const currentUnits = Number(units?.currentValue || 0);
-    const baseRev = currentRev > 0 ? currentRev * 0.7 : 15000000;
-    const baseUnits = currentUnits > 0 ? currentUnits * 0.7 : 100;
-
-    const revenueData = weeks.map((_, i) => Math.floor(baseRev + Math.sin(i / 2) * baseRev * 0.3 + i * (baseRev * 0.01)));
-    const unitsData = weeks.map((_, i) => Math.floor(baseUnits + Math.cos(i / 2) * baseUnits * 0.2 + i * 2));
+    const summary = getClientSummary(c.id);
+    const hasHistoryPayload = Array.isArray(summary?.monthlyHistory);
+    let history = summary?.monthlyHistory || [];
+    if (!hasHistoryPayload) {
+      const revenue = clientData.find((item) => String(item.clientId) === String(c.id) && item.metricType === 'revenue');
+      const units = clientData.find((item) => String(item.clientId) === String(c.id) && item.metricType === 'units');
+      const year = Number(summary?.year || new Date().getFullYear());
+      const month = Number(summary?.month || new Date().getMonth() + 1);
+      const previousMonth = month === 1 ? 12 : month - 1;
+      const previousYear = month === 1 ? year - 1 : year;
+      if (revenue || units) {
+        history = [
+          { year: previousYear, month: previousMonth, revenue: Number(revenue?.previousValue || 0), units: Number(units?.previousValue || 0) },
+          { year, month, revenue: Number(revenue?.currentValue || 0), units: Number(units?.currentValue || 0) }
+        ];
+      }
+    }
+    if (!history.some((item) => item.revenue !== null || item.units !== null)) {
+      canvas.replaceWith(Object.assign(document.createElement('p'), { className: 'weekly-chart-empty', textContent: 'Sin métricas mensuales cargadas para este cliente.' }));
+      return;
+    }
+    const monthLabels = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
     const chart = new Chart(canvas.getContext('2d'), {
       type: 'line',
       data: {
-        labels: weeks,
+        labels: history.map((item) => `${monthLabels[item.month - 1]} ${item.year}`),
         datasets: [
           {
             label: 'Facturacion ($)',
-            data: revenueData,
+            data: history.map((item) => item.revenue),
             borderColor: '#00d4ff',
             backgroundColor: 'rgba(0, 212, 255, 0.1)',
             borderWidth: 2,
@@ -648,7 +651,7 @@ function initCharts(clients) {
           },
           {
             label: 'Unidades',
-            data: unitsData,
+            data: history.map((item) => item.units),
             borderColor: '#ffcc00',
             borderWidth: 2,
             tension: 0.2,
@@ -678,36 +681,6 @@ function initCharts(clients) {
 function setupDynamicListeners() {
   const editable = isEditable();
   if (!editable) return;
-
-  // Estimated cell recalculation
-  document.querySelectorAll('[data-client-metric][data-field="current"]').forEach(input => {
-    input.addEventListener('input', () => {
-      const clientId = input.dataset.clientId;
-      const metricType = input.dataset.metricType;
-      const daysEl = document.querySelector('#days-elapsed');
-      const days = daysEl ? Number(daysEl.value) || 25 : 25;
-      const val = input.value.trim() === '' ? null : Number(input.value);
-      const cell = document.querySelector(`[data-estimated-for="${clientId}-${metricType}"]`);
-      if (!cell) return;
-      if (val !== null && days > 0) {
-        const est = Math.round((val / days) * 30);
-        const prefix = (metricType === 'revenue' || metricType === 'asp') ? '$' : '';
-        cell.textContent = prefix + est.toLocaleString('es-AR');
-      } else {
-        cell.textContent = '-';
-      }
-    });
-  });
-
-  // Recalculate estimates when days elapsed changes
-  const daysEl = document.querySelector('#days-elapsed');
-  if (daysEl) {
-    daysEl.addEventListener('input', () => {
-      document.querySelectorAll('[data-client-metric][data-field="current"]').forEach(input => {
-        input.dispatchEvent(new Event('input'));
-      });
-    });
-  }
 
   // Add free trial row
   const addFtBtn = document.querySelector('#add-ft-row');

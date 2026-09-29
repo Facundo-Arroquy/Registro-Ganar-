@@ -1,6 +1,7 @@
 export async function api(path, options = {}) {
   const token = getSessionToken();
   const response = await fetch(path, {
+    cache: 'no-store',
     headers: {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
