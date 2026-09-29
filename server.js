@@ -125,6 +125,9 @@ async function getClientPeriodSummaries(clientIds, year, month) {
     const totalDays = daysInMonth(year, month);
     const estimatedRevenue = daysCovered > 0 ? revenue / daysCovered * totalDays : revenue;
     const estimatedUnits = daysCovered > 0 ? Math.round(units / daysCovered * totalDays) : Math.round(units);
+    const historyMonths = [...new Set(derived
+      .filter((item) => item.clientId === clientId && item.year === year && item.month <= month)
+      .map((item) => item.month))].sort((a, b) => a - b);
     return {
       clientId, year, month, daysCovered, totalDays, revenue, units, asp,
       previousRevenue: value('revenue', previousYear, previousMonth),
@@ -134,6 +137,14 @@ async function getClientPeriodSummaries(clientIds, year, month) {
       estimatedRevenue,
       estimatedUnits,
       estimatedAsp: estimatedUnits > 0 ? estimatedRevenue / estimatedUnits : 0,
+      monthlyHistory: historyMonths.map((historyMonth) => {
+        const historyRevenue = value('revenue', year, historyMonth);
+        const historyUnits = value('units', year, historyMonth);
+        return {
+          year, month: historyMonth, revenue: historyRevenue, units: historyUnits,
+          asp: historyUnits > 0 ? historyRevenue / historyUnits : 0
+        };
+      }),
       weeks: weeklyMetrics.filter((item) => item.client_id === clientId).map((item) => ({
         week: Number(item.week), revenue: Number(item.revenue), units: Number(item.units),
         asp: Number(item.units) > 0 ? Number(item.revenue) / Number(item.units) : 0

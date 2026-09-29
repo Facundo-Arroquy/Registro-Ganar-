@@ -596,28 +596,21 @@ function initCharts(clients) {
   clients.forEach(c => {
     const canvas = document.getElementById(`chart-${c.id}`);
     if (!canvas) return;
-
-    const revenue = clientData.find(x => x.clientId === c.id && x.metricType === 'revenue');
-    const units = clientData.find(x => x.clientId === c.id && x.metricType === 'units');
-
-    // Generate mock weekly labels and trend data based on current values
-    const weeks = Array.from({ length: 38 }, (_, i) => `Sem ${i + 1}`);
-    const currentRev = Number(revenue?.currentValue || 0);
-    const currentUnits = Number(units?.currentValue || 0);
-    const baseRev = currentRev > 0 ? currentRev * 0.7 : 15000000;
-    const baseUnits = currentUnits > 0 ? currentUnits * 0.7 : 100;
-
-    const revenueData = weeks.map((_, i) => Math.floor(baseRev + Math.sin(i / 2) * baseRev * 0.3 + i * (baseRev * 0.01)));
-    const unitsData = weeks.map((_, i) => Math.floor(baseUnits + Math.cos(i / 2) * baseUnits * 0.2 + i * 2));
+    const history = clientSummaries.find((item) => item.clientId === c.id)?.monthlyHistory || [];
+    if (!history.length) {
+      canvas.replaceWith(Object.assign(document.createElement('p'), { className: 'weekly-chart-empty', textContent: 'Sin métricas mensuales cargadas para este cliente.' }));
+      return;
+    }
+    const monthLabels = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
     const chart = new Chart(canvas.getContext('2d'), {
       type: 'line',
       data: {
-        labels: weeks,
+        labels: history.map((item) => `${monthLabels[item.month - 1]} ${item.year}`),
         datasets: [
           {
             label: 'Facturacion ($)',
-            data: revenueData,
+            data: history.map((item) => item.revenue),
             borderColor: '#00d4ff',
             backgroundColor: 'rgba(0, 212, 255, 0.1)',
             borderWidth: 2,
@@ -626,7 +619,7 @@ function initCharts(clients) {
           },
           {
             label: 'Unidades',
-            data: unitsData,
+            data: history.map((item) => item.units),
             borderColor: '#ffcc00',
             borderWidth: 2,
             tension: 0.2,
