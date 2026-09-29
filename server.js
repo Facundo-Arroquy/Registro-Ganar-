@@ -360,8 +360,7 @@ async function generateRecurringCardsThroughToday() {
             created_by: task.created_by || null,
             assigned_to: task.assigned_to || null,
             recurring_task_id: task.id,
-            occurrence_date: occurrenceDate,
-            entered_column_at: new Date().toISOString()
+            occurrence_date: occurrenceDate
           });
         }
         occurrenceDate = addDays(occurrenceDate, 1);
@@ -393,8 +392,8 @@ async function getSupabaseState() {
     supabaseRest('/settings_audit?select=action,user_id,user_name,created_at&order=created_at.desc&limit=50'),
     supabaseRest('/clients?select=id,name,company,email,owner_id,status_id,consultor_id,complexity_id,ad_status_id,meli_user,meeting_day,meeting_time,meeting_frequency,time_bank_seconds'),
     supabaseRest('/boards?select=id,name,color,position&order=position.asc'),
-    supabaseRest('/board_columns?select=id,board_id,name,show_timer,position&order=position.asc'),
-    supabaseRest('/cards?select=id,board_id,column_id,client_id,title,description,due_date,created_by,assigned_to,entered_column_at,recurring_task_id,occurrence_date'),
+    supabaseRest('/board_columns?select=id,board_id,name,position&order=position.asc'),
+    supabaseRest('/cards?select=id,board_id,column_id,client_id,title,description,due_date,created_by,assigned_to,timer_status,timer_elapsed_seconds,timer_started_at,recurring_task_id,occurrence_date'),
     supabaseRest('/recurring_tasks?select=id,board_id,title,start_date,end_date,active'),
     supabaseRest('/recurring_task_days?select=recurring_task_id,weekday,column_id'),
     supabaseRest('/client_links?select=id,client_id,url,label'),
@@ -433,8 +432,7 @@ async function getSupabaseState() {
       color: board.color,
       columns: columns.filter((column) => column.board_id === board.id).map((column) => ({
         id: column.id,
-        name: column.name,
-        showTimer: column.show_timer
+        name: column.name
       })),
       cards: cards.filter((card) => card.board_id === board.id).map((card) => ({
         id: card.id,
@@ -447,7 +445,9 @@ async function getSupabaseState() {
         assignedTo: card.assigned_to || '',
         recurringTaskId: card.recurring_task_id || '',
         occurrenceDate: card.occurrence_date || '',
-        enteredColumnAt: card.entered_column_at ? new Date(card.entered_column_at).getTime() : Date.now()
+        timerStatus: card.timer_status,
+        timerElapsedSeconds: Number(card.timer_elapsed_seconds || 0),
+        timerStartedAt: card.timer_started_at ? new Date(card.timer_started_at).getTime() : null
       }))
     })),
     recurringTasks: recurringTasks.map((task) => ({
@@ -692,15 +692,15 @@ async function getSupabaseBoard(boardId) {
   const encodedId = encodeURIComponent(boardId);
   const [[board], columns, cards] = await Promise.all([
     supabaseRest(`/boards?select=id,name,color&id=eq.${encodedId}&limit=1`),
-    supabaseRest(`/board_columns?select=id,name,show_timer&board_id=eq.${encodedId}&order=position.asc`),
-    supabaseRest(`/cards?select=id,column_id,client_id,title,description,due_date,created_by,assigned_to,entered_column_at,recurring_task_id,occurrence_date&board_id=eq.${encodedId}`)
+    supabaseRest(`/board_columns?select=id,name&board_id=eq.${encodedId}&order=position.asc`),
+    supabaseRest(`/cards?select=id,column_id,client_id,title,description,due_date,created_by,assigned_to,timer_status,timer_elapsed_seconds,timer_started_at,recurring_task_id,occurrence_date&board_id=eq.${encodedId}`)
   ]);
   if (!board) return null;
   return {
     id: board.id,
     name: board.name,
     color: board.color,
-    columns: columns.map((column) => ({ id: column.id, name: column.name, showTimer: column.show_timer })),
+    columns: columns.map((column) => ({ id: column.id, name: column.name })),
     cards: cards.map((card) => ({
       id: card.id,
       columnId: card.column_id,
@@ -712,7 +712,9 @@ async function getSupabaseBoard(boardId) {
       assignedTo: card.assigned_to || '',
       recurringTaskId: card.recurring_task_id || '',
       occurrenceDate: card.occurrence_date || '',
-      enteredColumnAt: card.entered_column_at ? new Date(card.entered_column_at).getTime() : Date.now()
+      timerStatus: card.timer_status,
+      timerElapsedSeconds: Number(card.timer_elapsed_seconds || 0),
+      timerStartedAt: card.timer_started_at ? new Date(card.timer_started_at).getTime() : null
     }))
   };
 }
@@ -1680,7 +1682,7 @@ async function handleApi(req, res, url) {
       id: makeId('b'),
       name,
       color: '#2b52ff',
-      columns: [{ id: makeId('c'), name: 'Pendiente', showTimer: false }],
+      columns: [{ id: makeId('c'), name: 'Pendiente' }],
       cards: []
     };
     await supabaseRest('/boards', {
@@ -1691,7 +1693,7 @@ async function handleApi(req, res, url) {
     await supabaseRest('/board_columns', {
       method: 'POST',
       headers: { Prefer: 'return=representation' },
-      body: JSON.stringify([{ id: board.columns[0].id, board_id: board.id, name: board.columns[0].name, show_timer: false, position: 1 }])
+      body: JSON.stringify([{ id: board.columns[0].id, board_id: board.id, name: board.columns[0].name, position: 1 }])
     });
     recordAuditInBackground(body, `Creo el tablero "${name}"`);
     return sendJson(res, 201, { board });
@@ -1724,7 +1726,7 @@ async function handleApi(req, res, url) {
     if (req.method === 'POST' && segments[3] === 'columns') {
       const name = String(body.name || '').trim();
       if (!name) return sendError(res, 400, 'El nombre es obligatorio');
-      const column = { id: makeId('c'), name, showTimer: Boolean(body.showTimer) };
+      const column = { id: makeId('c'), name };
       await supabaseRest('/board_columns', {
         method: 'POST',
         headers: { Prefer: 'return=representation' },
@@ -1732,7 +1734,6 @@ async function handleApi(req, res, url) {
           id: column.id,
           board_id: board.id,
           name: column.name,
-          show_timer: column.showTimer,
           position: await getNextColumnPosition(board.id)
         }])
       });
@@ -1849,7 +1850,21 @@ async function handleApi(req, res, url) {
       return sendJson(res, 200, { board });
     }
 
-    if (req.method === 'POST' && segments[3] === 'cards') {
+    if (req.method === 'POST' && segments[3] === 'cards' && segments[4] && segments[5] === 'timer') {
+      const card = board.cards.find((item) => item.id === segments[4]);
+      if (!card) return sendError(res, 404, 'Tarjeta no encontrada');
+      const action = String(body.action || '');
+      if (!['start', 'pause', 'resume', 'finish'].includes(action)) return sendError(res, 400, 'Accion de cronometro invalida');
+      await supabaseRest('/rpc/control_card_timer', {
+        method: 'POST',
+        body: JSON.stringify({ p_card_id: card.id, p_action: action })
+      });
+      const actionLabels = { start: 'Inicio', pause: 'Pauso', resume: 'Continuo', finish: 'Termino' };
+      recordAuditInBackground(body, `${actionLabels[action]} el tiempo de la tarjeta "${card.title}" en "${board.name}"`);
+      return sendJson(res, 200, { updated: true });
+    }
+
+    if (req.method === 'POST' && segments[3] === 'cards' && segments.length === 4) {
       const title = String(body.title || '').trim();
       if (!title) return sendError(res, 400, 'El titulo es obligatorio');
       const card = {
@@ -1861,7 +1876,9 @@ async function handleApi(req, res, url) {
         dueDate: String(body.dueDate || ''),
         createdBy: String(body.createdBy || ''),
         assignedTo: String(body.assignedTo || ''),
-        enteredColumnAt: Date.now()
+        timerStatus: 'idle',
+        timerElapsedSeconds: 0,
+        timerStartedAt: null
       };
       if (!board.columns.some((column) => column.id === card.columnId)) return sendError(res, 400, 'Columna invalida');
       await supabaseRest('/cards', {
@@ -1876,8 +1893,7 @@ async function handleApi(req, res, url) {
           description: card.description,
           due_date: card.dueDate || null,
           created_by: card.createdBy || null,
-          assigned_to: card.assignedTo || null,
-          entered_column_at: new Date(card.enteredColumnAt).toISOString()
+          assigned_to: card.assignedTo || null
         }])
       });
       board.cards.push(card);
@@ -1900,7 +1916,6 @@ async function handleApi(req, res, url) {
       });
       if (!card.title) return sendError(res, 400, 'El titulo es obligatorio');
       if (!board.columns.some((column) => column.id === card.columnId)) return sendError(res, 400, 'Columna invalida');
-      if (previousColumnId !== card.columnId) card.enteredColumnAt = Date.now();
       await supabaseRest(`/cards?id=eq.${encodeURIComponent(card.id)}`, {
         method: 'PATCH',
         headers: { Prefer: 'return=representation' },
@@ -1910,8 +1925,7 @@ async function handleApi(req, res, url) {
           title: card.title,
           description: card.description,
           due_date: card.dueDate || null,
-          assigned_to: card.assignedTo || null,
-          entered_column_at: new Date(card.enteredColumnAt).toISOString()
+          assigned_to: card.assignedTo || null
         })
       });
       if (previousColumnId !== card.columnId) {

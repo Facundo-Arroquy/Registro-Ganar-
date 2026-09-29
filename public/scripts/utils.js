@@ -30,15 +30,12 @@ export function getDueDateStatus(dueDateStr) {
   return { status: 'normal', label: `${day}/${month}/${year}` };
 }
 
-export function getTimeInColumn(enteredTimestamp) {
-  if (!enteredTimestamp) return 'Reciente';
-  const diffMs = Date.now() - Number(enteredTimestamp);
-  const diffMins = Math.floor(diffMs / (1000 * 60));
-  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-  if (diffMins < 60) return `${Math.max(diffMins, 0)}m en col.`;
-  if (diffHours < 24) return `${diffHours}h en col.`;
-  return `${diffDays}d en col.`;
+export function formatTimerDuration(durationSeconds) {
+  const totalSeconds = Math.max(0, Math.floor(Number(durationSeconds) || 0));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return hours ? `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}` : `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
 export function setButtonLoading(button, loading, originalText = null) {

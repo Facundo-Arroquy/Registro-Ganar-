@@ -174,10 +174,7 @@ function getClientCards(clientId) {
 }
 
 function getTimedClientCards(clientId) {
-  return state.boards.flatMap((board) => {
-    const timedColumnIds = new Set(board.columns.filter((column) => column.showTimer).map((column) => column.id));
-    return board.cards.filter((card) => card.clientId === clientId && timedColumnIds.has(card.columnId) && card.enteredColumnAt);
-  });
+  return state.boards.flatMap((board) => board.cards.filter((card) => card.clientId === clientId && card.timerStatus !== 'idle'));
 }
 
 function formatDuration(durationSeconds) {

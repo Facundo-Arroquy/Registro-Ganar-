@@ -1,13 +1,14 @@
 import { api, requireSession } from './api.js';
 import { getActiveBoard, loadAppState, refreshAppState, setActiveBoard } from './app-state.js';
 import { closeModal, openModal, renderSidebar } from './layout.js';
-import { escapeHtml, getDueDateStatus, getInitials, getTimeInColumn, setButtonLoading } from './utils.js';
+import { escapeHtml, formatTimerDuration, getDueDateStatus, getInitials, setButtonLoading } from './utils.js';
 
 const currentUser = requireSession();
 let state;
 let draggedCardId = null;
 let draggedColumnId = null;
 let boardWriteQueue = Promise.resolve();
+let timerInterval = null;
 
 async function boot() {
   state = await loadAppState();
@@ -44,30 +45,30 @@ function renderActiveBoard() {
   document.querySelector('#current-board-color').style.backgroundColor = board.color;
   document.querySelector('#kanban-board').innerHTML = board.columns.map((column) => renderColumn(board, column)).join('');
   bindKanbanEvents();
+  startTimerRefresh();
 }
 
 function renderColumn(board, column) {
   const cards = board.cards.filter((card) => card.columnId === column.id);
   return `
-    <section class="column ${column.showTimer ? 'timer-column' : ''}" draggable="true" data-column-id="${escapeHtml(column.id)}">
+    <section class="column" draggable="true" data-column-id="${escapeHtml(column.id)}">
       <div class="column-header">
         <div class="column-title">
           <span class="drag-handle">::</span>
           <span>${escapeHtml(column.name)}</span>
           <span class="card-count">${cards.length}</span>
-          ${column.showTimer ? '<span class="timer-column-badge">Controla tiempo</span>' : ''}
         </div>
         <button class="btn-icon" type="button" data-delete-column="${escapeHtml(column.id)}" title="Eliminar columna">Eliminar</button>
       </div>
       <div class="cards-container" data-card-drop="${escapeHtml(column.id)}">
-        ${cards.map((card) => renderCard(card, column.showTimer)).join('')}
+        ${cards.map((card) => renderCard(card)).join('')}
       </div>
       <button class="add-card-btn" type="button" data-add-card="${escapeHtml(column.id)}">+ Anadir tarjeta</button>
     </section>
   `;
 }
 
-function renderCard(card, showTimer) {
+function renderCard(card) {
   const client = state.clients.find((item) => item.id === card.clientId);
   const assignee = state.users.find((item) => item.id === card.assignedTo);
   const dueStatus = getDueDateStatus(card.dueDate);
@@ -79,7 +80,7 @@ function renderCard(card, showTimer) {
       <div class="badges-container">
         ${card.recurringTaskId ? '<div class="recurring-badge" title="Tarea recurrente">↻ Recurrente</div>' : ''}
         ${dueStatus ? `<div class="due-date-badge ${dueStatus.status}">${escapeHtml(dueStatus.label)}</div>` : ''}
-        ${showTimer ? `<div class="time-badge">${escapeHtml(getTimeInColumn(card.enteredColumnAt))}</div>` : ''}
+        ${renderCardTimer(card)}
       </div>
       <div class="card-meta">
         <span>Cliente: ${client ? escapeHtml(client.name) : 'Sin asignar'}</span>
@@ -87,6 +88,35 @@ function renderCard(card, showTimer) {
       </div>
     </article>
   `;
+}
+
+function currentTimerSeconds(card) {
+  const runningSeconds = card.timerStatus === 'running' && card.timerStartedAt
+    ? Math.max(0, Math.floor((Date.now() - card.timerStartedAt) / 1000))
+    : 0;
+  return Number(card.timerElapsedSeconds || 0) + runningSeconds;
+}
+
+function renderCardTimer(card) {
+  const action = card.timerStatus === 'idle' ? 'start' : card.timerStatus === 'running' ? 'pause' : card.timerStatus === 'paused' ? 'resume' : '';
+  const label = action === 'start' ? 'Iniciar' : action === 'pause' ? 'Pausar' : action === 'resume' ? 'Continuar' : '';
+  return `<div class="card-timer ${escapeHtml(card.timerStatus)}">
+    <span class="time-badge" data-timer-value="${escapeHtml(card.id)}">${formatTimerDuration(currentTimerSeconds(card))}</span>
+    ${action ? `<button class="timer-action" type="button" data-timer-action="${action}" data-timer-card="${escapeHtml(card.id)}">${label}</button>` : '<span class="timer-finished">Terminado</span>'}
+    ${card.timerStatus === 'running' || card.timerStatus === 'paused' ? `<button class="timer-action timer-finish" type="button" data-timer-action="finish" data-timer-card="${escapeHtml(card.id)}">Terminar</button>` : ''}
+  </div>`;
+}
+
+function startTimerRefresh() {
+  clearInterval(timerInterval);
+  timerInterval = setInterval(() => {
+    const board = getActiveBoard(state);
+    if (!board) return;
+    board.cards.filter((card) => card.timerStatus === 'running').forEach((card) => {
+      const value = document.querySelector(`[data-timer-value="${CSS.escape(card.id)}"]`);
+      if (value) value.textContent = formatTimerDuration(currentTimerSeconds(card));
+    });
+  }, 1000);
 }
 
 function bindKanbanEvents() {
@@ -110,6 +140,12 @@ function bindKanbanEvents() {
       card.classList.remove('dragging');
       document.querySelectorAll('.cards-container').forEach((item) => item.classList.remove('card-drag-over'));
       draggedCardId = null;
+    });
+  });
+  document.querySelectorAll('[data-timer-action]').forEach((button) => {
+    button.addEventListener('click', async (event) => {
+      event.stopPropagation();
+      await controlTimer(button.dataset.timerCard, button.dataset.timerAction, button);
     });
   });
   document.querySelectorAll('[data-card-drop]').forEach((drop) => {
@@ -166,9 +202,6 @@ async function openColumnModal() {
           <label for="column-name-input">Nombre de la columna</label>
           <input type="text" id="column-name-input" class="form-control" placeholder="Ej. En Revision">
         </div>
-        <div class="form-group">
-          <label class="checkbox-group"><input type="checkbox" id="column-timer-toggle" checked><span>Mostrar tiempo en esta columna</span></label>
-        </div>
         <div class="modal-actions">
           <button class="btn btn-secondary" type="button" data-close-modal>Cancelar</button>
           <button class="btn" type="submit">Crear Columna</button>
@@ -189,7 +222,7 @@ async function openColumnModal() {
     try {
       await api(`/api/boards/${board.id}/columns`, {
         method: 'POST',
-        body: JSON.stringify({ name, showTimer: overlay.querySelector('#column-timer-toggle').checked, ...auditUser() })
+        body: JSON.stringify({ name, ...auditUser() })
       });
       closeModal();
       await refresh();
@@ -363,7 +396,6 @@ async function moveCard(cardId, columnId) {
   if (!card || card.columnId === columnId) return;
   const payload = { ...card, columnId, ...auditUser() };
   card.columnId = columnId;
-  card.enteredColumnAt = Date.now();
   renderActiveBoard();
   try {
     await enqueueBoardWrite(() => api(`/api/boards/${board.id}/cards/${cardId}`, {
@@ -373,6 +405,23 @@ async function moveCard(cardId, columnId) {
   } catch (error) {
     alert(error.message);
     await refresh();
+  }
+}
+
+async function controlTimer(cardId, action, button) {
+  if (button.disabled) return;
+  if (action === 'finish' && !confirm('¿Terminar el registro de tiempo de esta tag? Esta accion no se puede deshacer.')) return;
+  button.disabled = true;
+  try {
+    const board = getActiveBoard(state);
+    await api(`/api/boards/${board.id}/cards/${cardId}/timer`, {
+      method: 'POST',
+      body: JSON.stringify({ action, ...auditUser() })
+    });
+    await refresh();
+  } catch (error) {
+    button.disabled = false;
+    alert(error.message);
   }
 }
 
