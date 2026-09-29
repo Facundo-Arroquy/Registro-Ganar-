@@ -43,7 +43,7 @@ function renderPage() {
     <header class="client-profile-header">
       <div class="client-profile-avatar">${escapeHtml(getInitials(client.company || client.name))}</div>
       <div class="client-profile-identity">
-        <div class="client-profile-title"><h1>${escapeHtml(client.company || client.name)}</h1><span class="client-status-pill">${escapeHtml(client.status || 'Sin estado')}</span></div>
+        <div class="client-profile-title"><h1>${escapeHtml(client.company || client.name)}</h1>${renderConfiguredBadge('clientStatuses', client.status || 'Sin estado')}</div>
         <p>${escapeHtml(client.name || 'Sin contacto principal')}</p>
       </div>
     </header>
@@ -52,8 +52,8 @@ function renderPage() {
       ${infoItem('Correo', client.email || '-')}
       ${infoItem('Responsable', owner?.name || 'Sin asignar')}
       ${infoItem('Consultor', client.consultor || 'Sin asignar')}
-      ${infoItem('Complejidad', client.complexity || 'Sin definir')}
-      ${infoItem('Publicidad', client.adStatus || 'Sin definir')}
+      ${client.complexity ? infoHtmlItem('Complejidad', renderConfiguredBadge('complexities', client.complexity)) : infoItem('Complejidad', 'Sin definir')}
+      ${client.adStatus ? infoHtmlItem('Publicidad', renderConfiguredBadge('adStatuses', client.adStatus)) : infoItem('Publicidad', 'Sin definir')}
       ${infoItem('Reunión habitual', formatRecurringMeeting(client))}
       ${infoItem('Banco de tiempo', formatDuration(client.timeBankSeconds))}
     </section>
@@ -75,6 +75,19 @@ function renderPage() {
 
 function infoItem(label, value) {
   return `<div class="client-info-item"><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong></div>`;
+}
+
+function infoHtmlItem(label, value) {
+  return `<div class="client-info-item"><span>${escapeHtml(label)}</span><strong>${value}</strong></div>`;
+}
+
+function getSettingColor(collection, name) {
+  const item = (state.settings?.[collection] || []).find((entry) => (typeof entry === 'string' ? entry : entry?.name) === name);
+  return typeof item === 'object' && /^#[0-9a-fA-F]{6}$/.test(item?.color || '') ? item.color : '#388bfd';
+}
+
+function renderConfiguredBadge(collection, name) {
+  return `<span class="status-badge custom-status" style="--status-color: ${escapeHtml(getSettingColor(collection, name))}">${escapeHtml(name)}</span>`;
 }
 
 function renderLinks(links) {

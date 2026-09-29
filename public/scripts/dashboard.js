@@ -49,7 +49,7 @@ function renderDashboard() {
   if (countsRow) {
     countsRow.innerHTML = Object.entries(statusCounts)
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([status, count]) => `<div class="status-count-chip"><span class="status-count-label">${escapeHtml(status)}</span><span class="status-count-value">${count}</span></div>`)
+      .map(([status, count]) => `<div class="status-count-chip custom-status" style="--status-color: ${escapeHtml(getStatusColor(status))}"><span class="status-count-label">${escapeHtml(status)}</span><span class="status-count-value">${count}</span></div>`)
       .join('');
   }
 

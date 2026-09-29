@@ -72,9 +72,9 @@ function initSidebarToggle() {
 }
 
 function injectBackButton() {
-  // Don't add on dashboard (home) or weekly (has its own back btn) or if already injected
+  // Don't add where the page is home-like or already renders its own navigation.
   const page = document.body.dataset.page;
-  if (page === 'dashboard' || page === 'weekly') return;
+  if (page === 'dashboard' || page === 'weekly' || page === 'clientes' || page === 'cliente') return;
   if (document.querySelector('.btn-back')) return;
 
   const main = document.querySelector('main');

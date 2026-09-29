@@ -119,7 +119,7 @@ function renderClientFilter() {
         <label class="weekly-filter-item">
           <input type="checkbox" data-filter-client="${c.id}" ${selectedClientIds.has(c.id) ? 'checked' : ''}>
           <span>${escapeHtml(c.company || c.name)}</span>
-          <small>${escapeHtml(c.status || '')}</small>
+          ${c.status ? renderConfiguredBadge('clientStatuses', c.status) : ''}
         </label>
       `).join('')}
     </div>
@@ -329,7 +329,7 @@ function renderClientUpdateSlide(clients) {
                 <tr>
                   <td><strong>${escapeHtml(c.company || c.name)}</strong></td>
                   <td><span class="tag ${tagClass}">${escapeHtml(c.consultor || '-')}</span></td>
-                  <td>${escapeHtml(c.status || 'Activo')}</td>
+                  <td>${renderConfiguredBadge('clientStatuses', c.status || 'Activo')}</td>
                 </tr>
               `;
             }).join('')}
@@ -612,6 +612,15 @@ function renderFinalSlide() {
 function destroyCharts() {
   charts.forEach(c => c.destroy());
   charts = [];
+}
+
+function getSettingColor(collection, name) {
+  const item = (state.settings?.[collection] || []).find((entry) => (typeof entry === 'string' ? entry : entry?.name) === name);
+  return typeof item === 'object' && /^#[0-9a-fA-F]{6}$/.test(item?.color || '') ? item.color : '#388bfd';
+}
+
+function renderConfiguredBadge(collection, name) {
+  return `<span class="status-badge custom-status" style="--status-color: ${escapeHtml(getSettingColor(collection, name))}">${escapeHtml(name)}</span>`;
 }
 
 function initCharts(clients) {

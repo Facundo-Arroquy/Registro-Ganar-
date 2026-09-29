@@ -31,7 +31,7 @@ function renderSummary() {
   document.querySelector('#clients-summary').innerHTML = `
     <button type="button" class="client-summary-card ${selectedStatuses.size === 0 ? 'active' : ''}" data-status-filter="" aria-pressed="${selectedStatuses.size === 0}"><span>Total</span><strong>${state.clients.length}</strong></button>
     ${[...counts.entries()].sort(([a], [b]) => a.localeCompare(b, 'es')).map(([status, count]) => `
-      <button type="button" class="client-summary-card ${selectedStatuses.has(status) ? 'active' : ''}" data-status-filter="${escapeHtml(status)}" aria-pressed="${selectedStatuses.has(status)}"><span>${escapeHtml(status)}</span><strong>${count}</strong></button>
+      <button type="button" class="client-summary-card status-filter-card ${selectedStatuses.has(status) ? 'active' : ''}" style="--status-color: ${escapeHtml(getSettingColor('clientStatuses', status))}" data-status-filter="${escapeHtml(status)}" aria-pressed="${selectedStatuses.has(status)}"><span>${escapeHtml(status)}</span><strong>${count}</strong></button>
     `).join('')}
   `;
   document.querySelectorAll('[data-status-filter]').forEach((button) => button.addEventListener('click', () => {
@@ -58,7 +58,7 @@ function renderClients() {
       <a class="client-directory-card" href="/cliente?id=${encodeURIComponent(client.id)}">
         <div class="client-card-avatar">${escapeHtml(getInitials(client.company || client.name))}</div>
         <div class="client-card-main">
-          <div class="client-card-title"><h2>${escapeHtml(client.company || client.name)}</h2><span class="client-status-pill">${escapeHtml(client.status || 'Sin estado')}</span></div>
+          <div class="client-card-title"><h2>${escapeHtml(client.company || client.name)}</h2>${renderConfiguredBadge('clientStatuses', client.status || 'Sin estado')}</div>
           <p>${escapeHtml(client.name || 'Sin contacto')}</p>
           <div class="client-card-meta">
             <span>${escapeHtml(client.consultor || 'Sin consultor')}</span>
@@ -69,6 +69,15 @@ function renderClients() {
         <span class="client-card-arrow" aria-hidden="true">&rarr;</span>
       </a>`;
   }).join('') : '<div class="client-empty-state">No encontramos clientes con esa búsqueda.</div>';
+}
+
+function getSettingColor(collection, name) {
+  const item = (state.settings?.[collection] || []).find((entry) => (typeof entry === 'string' ? entry : entry?.name) === name);
+  return typeof item === 'object' && /^#[0-9a-fA-F]{6}$/.test(item?.color || '') ? item.color : '#388bfd';
+}
+
+function renderConfiguredBadge(collection, name) {
+  return `<span class="status-badge custom-status" style="--status-color: ${escapeHtml(getSettingColor(collection, name))}">${escapeHtml(name)}</span>`;
 }
 
 boot().catch((error) => {
