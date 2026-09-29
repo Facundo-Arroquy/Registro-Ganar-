@@ -76,6 +76,73 @@ function localDateString(date = new Date()) {
   }).format(date);
 }
 
+function currentArgentinaPeriod() {
+  const [year, month] = localDateString().split('-').map(Number);
+  return { year, month };
+}
+
+function daysInMonth(year, month) {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+function derivedMonthlyMetrics(rows) {
+  const groups = new Map();
+  for (const row of rows) {
+    const key = `${row.client_id}|${row.year}|${row.month}`;
+    if (!groups.has(key)) groups.set(key, { clientId: row.client_id, year: Number(row.year), month: Number(row.month), revenue: null, units: null });
+    const group = groups.get(key);
+    if (row.metric_type === 'revenue') group.revenue = row.value === null ? null : Number(row.value);
+    if (row.metric_type === 'units') group.units = row.value === null ? null : Number(row.value);
+  }
+  return [...groups.values()].flatMap((group) => {
+    const asp = group.revenue !== null && group.units > 0 ? group.revenue / group.units : 0;
+    return [
+      { clientId: group.clientId, year: group.year, month: group.month, metricType: 'revenue', value: group.revenue },
+      { clientId: group.clientId, year: group.year, month: group.month, metricType: 'units', value: group.units },
+      { clientId: group.clientId, year: group.year, month: group.month, metricType: 'asp', value: asp }
+    ];
+  });
+}
+
+async function getClientPeriodSummaries(clientIds, year, month) {
+  if (!clientIds.length) return [];
+  const encodedIds = clientIds.map((id) => `"${String(id).replaceAll('"', '')}"`).join(',');
+  const previousMonth = month === 1 ? 12 : month - 1;
+  const previousYear = month === 1 ? year - 1 : year;
+  const [metrics, progress, comments, weeklyMetrics] = await Promise.all([
+    supabaseRest(`/client_monthly_metrics?select=client_id,year,month,metric_type,value&client_id=in.(${encodeURIComponent(encodedIds)})&or=(and(year.eq.${year},month.eq.${month}),and(year.eq.${previousYear},month.eq.${previousMonth}),and(year.eq.${year},month.lte.${month}))`),
+    supabaseRest(`/client_month_progress?select=client_id,days_covered&client_id=in.(${encodeURIComponent(encodedIds)})&year=eq.${year}&month=eq.${month}`),
+    supabaseRest(`/client_comments?select=id,client_id,content,author_name,created_at&client_id=in.(${encodeURIComponent(encodedIds)})&order=created_at.desc`),
+    supabaseRest(`/client_weekly_metrics?select=client_id,week,revenue,units&client_id=in.(${encodeURIComponent(encodedIds)})&year=eq.${year}&month=eq.${month}&order=week.asc`)
+  ]);
+  const derived = derivedMonthlyMetrics(metrics);
+  return clientIds.map((clientId) => {
+    const value = (type, targetYear = year, targetMonth = month) => derived.find((item) => item.clientId === clientId && item.year === targetYear && item.month === targetMonth && item.metricType === type)?.value ?? 0;
+    const revenue = value('revenue');
+    const units = value('units');
+    const asp = units > 0 ? revenue / units : 0;
+    const daysCovered = Number(progress.find((item) => item.client_id === clientId)?.days_covered || 0);
+    const totalDays = daysInMonth(year, month);
+    const estimatedRevenue = daysCovered > 0 ? revenue / daysCovered * totalDays : revenue;
+    const estimatedUnits = daysCovered > 0 ? Math.round(units / daysCovered * totalDays) : Math.round(units);
+    return {
+      clientId, year, month, daysCovered, totalDays, revenue, units, asp,
+      previousRevenue: value('revenue', previousYear, previousMonth),
+      previousUnits: value('units', previousYear, previousMonth),
+      ytdRevenue: derived.filter((item) => item.clientId === clientId && item.year === year && item.month <= month && item.metricType === 'revenue').reduce((sum, item) => sum + Number(item.value || 0), 0),
+      ytdUnits: derived.filter((item) => item.clientId === clientId && item.year === year && item.month <= month && item.metricType === 'units').reduce((sum, item) => sum + Number(item.value || 0), 0),
+      estimatedRevenue,
+      estimatedUnits,
+      estimatedAsp: estimatedUnits > 0 ? estimatedRevenue / estimatedUnits : 0,
+      weeks: weeklyMetrics.filter((item) => item.client_id === clientId).map((item) => ({
+        week: Number(item.week), revenue: Number(item.revenue), units: Number(item.units),
+        asp: Number(item.units) > 0 ? Number(item.revenue) / Number(item.units) : 0
+      })),
+      lastComment: comments.find((item) => item.client_id === clientId) || null
+    };
+  });
+}
+
 function addDays(dateString, amount) {
   const date = new Date(`${dateString}T12:00:00Z`);
   date.setUTCDate(date.getUTCDate() + amount);
@@ -1326,6 +1393,7 @@ async function handleApi(req, res, url) {
 
     if (req.method === 'GET' && segments[3] === 'detail' && segments.length === 4) {
       const encodedClientId = encodeURIComponent(client.id);
+      const currentPeriod = currentArgentinaPeriod();
       const [links, metrics, reports, calendarEvents, cards, manualComments] = await Promise.all([
         supabaseRest(`/client_links?select=id,url,label&client_id=eq.${encodedClientId}&order=created_at.asc`),
         supabaseRest(`/client_monthly_metrics?select=id,year,month,metric_type,value&client_id=eq.${encodedClientId}&order=year.desc,month.asc`).catch((error) => {
@@ -1352,9 +1420,11 @@ async function handleApi(req, res, url) {
           reportId: report.id
         }));
       });
+      const [currentPeriodSummary] = await getClientPeriodSummaries([client.id], currentPeriod.year, currentPeriod.month);
       return sendJson(res, 200, {
         client: { ...client, links },
-        metrics: metrics.map((item) => ({ id: item.id, year: item.year, month: item.month, metricType: item.metric_type, value: item.value === null ? null : Number(item.value) })),
+        metrics: derivedMonthlyMetrics(metrics),
+        currentPeriodSummary,
         comments,
         manualComments: manualComments.map((item) => ({
           id: item.id,
@@ -1375,6 +1445,57 @@ async function handleApi(req, res, url) {
           enteredColumnAt: item.entered_column_at
         }))
       });
+    }
+
+    if (segments[3] === 'months' && segments[4] && segments[5] && segments.length === 6) {
+      const year = Number(segments[4]);
+      const month = Number(segments[5]);
+      if (!Number.isInteger(year) || year < 2000 || year > 2200 || !Number.isInteger(month) || month < 1 || month > 12) {
+        return sendError(res, 400, 'Periodo invalido');
+      }
+      const currentPeriod = currentArgentinaPeriod();
+      if (year !== currentPeriod.year || month !== currentPeriod.month) {
+        return sendError(res, 400, 'Solo se puede editar el mes en curso');
+      }
+      const encodedClientId = encodeURIComponent(client.id);
+      if (req.method === 'GET') {
+        const [weeks, progress, monthlyRows] = await Promise.all([
+          supabaseRest(`/client_weekly_metrics?select=week,revenue,units&client_id=eq.${encodedClientId}&year=eq.${year}&month=eq.${month}&order=week.asc`),
+          supabaseRest(`/client_month_progress?select=days_covered&client_id=eq.${encodedClientId}&year=eq.${year}&month=eq.${month}&limit=1`),
+          supabaseRest(`/client_monthly_metrics?select=metric_type,value&client_id=eq.${encodedClientId}&year=eq.${year}&month=eq.${month}&metric_type=in.(revenue,units)`)
+        ]);
+        const normalizedWeeks = Array.from({ length: 5 }, (_, index) => {
+          const saved = weeks.find((item) => Number(item.week) === index + 1);
+          return { week: index + 1, revenue: Number(saved?.revenue || 0), units: Number(saved?.units || 0) };
+        });
+        const existingRevenue = Number(monthlyRows.find((item) => item.metric_type === 'revenue')?.value || 0);
+        const existingUnits = Number(monthlyRows.find((item) => item.metric_type === 'units')?.value || 0);
+        return sendJson(res, 200, {
+          year, month, daysCovered: Number(progress[0]?.days_covered || 0), totalDays: daysInMonth(year, month),
+          weeks: normalizedWeeks, hasWeeklyDetail: weeks.length > 0,
+          existingMonthly: { revenue: existingRevenue, units: existingUnits, asp: existingUnits > 0 ? existingRevenue / existingUnits : 0 }
+        });
+      }
+      if (req.method === 'PUT') {
+        const maxDays = daysInMonth(year, month);
+        const daysCovered = Number(body.daysCovered);
+        const weeks = Array.isArray(body.weeks) ? body.weeks.map((item, index) => ({
+          week: index + 1,
+          revenue: Number(item.revenue || 0),
+          units: Number(item.units || 0)
+        })) : [];
+        if (!Number.isInteger(daysCovered) || daysCovered < 0 || daysCovered > maxDays) return sendError(res, 400, `Los dias contemplados deben estar entre 0 y ${maxDays}`);
+        if (weeks.length !== 5 || weeks.some((item) => !Number.isFinite(item.revenue) || item.revenue < 0 || !Number.isFinite(item.units) || item.units < 0 || !Number.isInteger(item.units))) {
+          return sendError(res, 400, 'Los valores semanales son invalidos');
+        }
+        await supabaseRest('/rpc/save_client_weekly_metrics', {
+          method: 'POST',
+          body: JSON.stringify({ p_client_id: client.id, p_year: year, p_month: month, p_days_covered: daysCovered, p_weeks: weeks })
+        });
+        const [summary] = await getClientPeriodSummaries([client.id], year, month);
+        recordAuditInBackground(body, `Actualizo las metricas de ${month}/${year} de "${client.company}"`);
+        return sendJson(res, 200, { summary });
+      }
     }
 
     if (req.method === 'POST' && segments[3] === 'comments' && segments.length === 4) {
@@ -1790,6 +1911,9 @@ async function handleApi(req, res, url) {
   if (req.method === 'POST' && url.pathname === '/api/client-monthly-metrics') {
     const { clientId, year, month, metrics } = body;
     if (!clientId || !year || !month || !Array.isArray(metrics)) return sendError(res, 400, 'clientId, year, month y metrics son requeridos');
+    if (metrics.some((metric) => !['revenue', 'units'].includes(metric.metricType))) {
+      return sendError(res, 400, 'El ASP es automático; solo se pueden cargar facturación y unidades');
+    }
     // Delete existing for this client/year/month, then insert
     await supabaseRest(`/client_monthly_metrics?client_id=eq.${encodeURIComponent(clientId)}&year=eq.${year}&month=eq.${month}`, { method: 'DELETE' });
     const rows = metrics.filter(m => m.value != null).map(m => ({
@@ -1811,11 +1935,16 @@ async function handleApi(req, res, url) {
   if (req.method === 'POST' && url.pathname === '/api/weekly-reports') {
     const weekLabel = String(body.weekLabel || '').trim();
     if (!weekLabel) return sendError(res, 400, 'weekLabel es requerido');
+    const selectedClientIds = [...new Set(Array.isArray(body.clientIds) ? body.clientIds.map(String).filter(Boolean) : [])];
+    if (!selectedClientIds.length) return sendError(res, 400, 'Selecciona al menos un cliente');
+    const encodedIds = selectedClientIds.map((id) => `"${id.replaceAll('"', '')}"`).join(',');
+    const existingClients = await supabaseRest(`/clients?select=id&id=in.(${encodeURIComponent(encodedIds)})`);
+    if (existingClients.length !== selectedClientIds.length) return sendError(res, 400, 'Hay clientes seleccionados que no existen');
     const id = makeId('wr');
     const daysElapsed = Number(body.daysElapsed) || 25;
     await supabaseRest('/weekly_reports', {
       method: 'POST',
-      body: JSON.stringify({ id, week_label: weekLabel, days_elapsed: daysElapsed, created_by: apiUser.id })
+      body: JSON.stringify({ id, week_label: weekLabel, days_elapsed: daysElapsed, meetings: { selectedClients: selectedClientIds }, created_by: apiUser.id })
     });
     return sendJson(res, 201, { report: { id, weekLabel, status: 'draft', daysElapsed, createdBy: apiUser.id } });
   }
@@ -1827,7 +1956,15 @@ async function handleApi(req, res, url) {
       const reports = await supabaseRest(`/weekly_reports?id=eq.${encodeURIComponent(reportId)}`);
       if (!reports.length) return sendError(res, 404, 'Report no encontrado');
       const report = reports[0];
-      const clientData = await supabaseRest(`/weekly_client_data?weekly_report_id=eq.${encodeURIComponent(reportId)}`);
+      let selectedClientIds = Array.isArray(report.meetings?.selectedClients) ? report.meetings.selectedClients.map(String) : [];
+      if (!selectedClientIds.length) {
+        const legacyRows = await supabaseRest(`/weekly_client_data?select=client_id&weekly_report_id=eq.${encodeURIComponent(reportId)}`);
+        selectedClientIds = [...new Set(legacyRows.map((item) => String(item.client_id)))];
+      }
+      const reportDate = new Date(report.created_at);
+      const reportYear = Number(new Intl.DateTimeFormat('en', { timeZone: 'America/Argentina/Buenos_Aires', year: 'numeric' }).format(reportDate));
+      const reportMonth = Number(new Intl.DateTimeFormat('en', { timeZone: 'America/Argentina/Buenos_Aires', month: 'numeric' }).format(reportDate));
+      const clientSummaries = await getClientPeriodSummaries(selectedClientIds, reportYear, reportMonth);
 
       // Derive week range from weekLabel (format: "DD/MM - DD/MM" or "DD/MM/YYYY - DD/MM/YYYY")
       let calendarEvents = [];
@@ -1860,13 +1997,16 @@ async function handleApi(req, res, url) {
       return sendJson(res, 200, {
         report: {
           id: report.id, weekLabel: report.week_label, status: report.status,
-          daysElapsed: report.days_elapsed, notes: report.notes, meetings: report.meetings,
+          daysElapsed: report.days_elapsed, notes: report.notes,
+          meetings: { ...(report.meetings || {}), selectedClients: selectedClientIds },
           createdAt: report.created_at, createdBy: report.created_by
         },
-        clientData: clientData.map(d => ({
-          id: d.id, clientId: d.client_id, metricType: d.metric_type,
-          currentValue: d.current_value, previousValue: d.previous_value, ytdValue: d.ytd_value
-        })),
+        clientData: clientSummaries.flatMap((summary) => [
+          { clientId: summary.clientId, metricType: 'revenue', currentValue: summary.revenue, previousValue: summary.previousRevenue, ytdValue: summary.ytdRevenue, estimatedValue: summary.estimatedRevenue },
+          { clientId: summary.clientId, metricType: 'units', currentValue: summary.units, previousValue: summary.previousUnits, ytdValue: summary.ytdUnits, estimatedValue: summary.estimatedUnits },
+          { clientId: summary.clientId, metricType: 'asp', currentValue: summary.asp, previousValue: summary.previousUnits > 0 ? summary.previousRevenue / summary.previousUnits : 0, ytdValue: summary.ytdUnits > 0 ? summary.ytdRevenue / summary.ytdUnits : 0, estimatedValue: summary.estimatedAsp }
+        ]),
+        clientSummaries,
         calendarEvents
       });
     }
@@ -1883,20 +2023,6 @@ async function handleApi(req, res, url) {
         method: 'PATCH',
         body: JSON.stringify(updates)
       });
-      if (Array.isArray(body.clientData)) {
-        await supabaseRest(`/weekly_client_data?weekly_report_id=eq.${encodeURIComponent(reportId)}`, { method: 'DELETE' });
-        const rows = body.clientData.filter(d => d.currentValue != null || d.previousValue != null || d.ytdValue != null).map(d => ({
-          id: d.id || makeId('wcd'), weekly_report_id: reportId, client_id: d.clientId,
-          metric_type: d.metricType, current_value: d.currentValue ?? null,
-          previous_value: d.previousValue ?? null, ytd_value: d.ytdValue ?? null
-        }));
-        if (rows.length) {
-          await supabaseRest('/weekly_client_data', {
-            method: 'POST',
-            body: JSON.stringify(rows)
-          });
-        }
-      }
       return sendJson(res, 200, { ok: true });
     }
 

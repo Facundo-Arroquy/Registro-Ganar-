@@ -1,6 +1,6 @@
 import { api, requireSession } from './api.js';
 import { loadAppState, refreshAppState } from './app-state.js';
-import { renderSidebar } from './layout.js';
+import { closeModal, openModal, renderSidebar } from './layout.js';
 import { escapeHtml, getInitials } from './utils.js';
 
 const currentUser = requireSession();
@@ -31,7 +31,7 @@ async function refresh() {
 }
 
 function availableYears() {
-  return [...new Set((detail?.metrics || []).map((item) => Number(item.year)))].sort((a, b) => b - a);
+  return [...new Set([new Date().getFullYear(), ...(detail?.metrics || []).map((item) => Number(item.year))])].sort((a, b) => b - a);
 }
 
 function renderPage() {
@@ -59,7 +59,7 @@ function renderPage() {
     </section>
     ${renderLinks(client.links || [])}
     <section class="client-detail-section">
-      <div class="client-section-heading"><div><p class="eyebrow">Resultados</p><h2>Métricas históricas</h2></div><div class="metrics-year-tabs" id="metrics-year-tabs"></div></div>
+      <div class="client-section-heading"><div><p class="eyebrow">Resultados</p><h2>Métricas históricas</h2></div><div class="metrics-heading-actions"><div class="metrics-year-tabs" id="metrics-year-tabs"></div><button class="btn btn-sm" type="button" id="edit-current-month">Editar ${monthNames[(detail.currentPeriodSummary?.month || new Date().getMonth() + 1) - 1]}</button></div></div>
       <div id="metrics-content"></div>
     </section>
     <div class="client-detail-columns">
@@ -71,6 +71,7 @@ function renderPage() {
   renderMetricYearTabs();
   renderMetrics();
   setupCommentActions();
+  document.querySelector('#edit-current-month')?.addEventListener('click', openMonthEditor);
 }
 
 function infoItem(label, value) {
@@ -112,9 +113,11 @@ function metricValue(type, month) {
 function renderMetrics() {
   const container = document.querySelector('#metrics-content');
   if (!detail.metrics.length) {
-    container.innerHTML = '<div class="client-empty-state">Todavía no hay métricas cargadas para este cliente.</div>';
+    container.innerHTML = '<div class="client-empty-state">Todavía no hay métricas cargadas. Usá “Editar mes” para comenzar.</div>';
     return;
   }
+  const projection = detail.currentPeriodSummary;
+  const showProjection = projection && selectedYear === projection.year;
   container.innerHTML = `
     <div class="metrics-kpis">${Object.entries(metricConfig).map(([type, config]) => {
       const values = monthNames.map((_, index) => metricValue(type, index + 1)).filter((value) => value !== null);
@@ -123,9 +126,55 @@ function renderMetrics() {
       return `<div class="metric-kpi"><span>${escapeHtml(config.label)} ${selectedYear}</span><strong>${formatMetric(total, config.money)}</strong><small>${values.length} ${values.length === 1 ? 'mes cargado' : 'meses cargados'}</small></div>`;
     }).join('')}</div>
     <div class="metrics-chart-wrap"><canvas id="client-metrics-chart"></canvas></div>
-    <div class="metrics-table-wrap"><table class="table metrics-table"><thead><tr><th>Métrica</th>${monthNames.map((month) => `<th>${month}</th>`).join('')}</tr></thead><tbody>${Object.entries(metricConfig).map(([type, config]) => `<tr><td><strong>${escapeHtml(config.label)}</strong></td>${monthNames.map((_, index) => `<td>${formatMetric(metricValue(type, index + 1), config.money)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
+    <div class="metrics-table-wrap"><table class="table metrics-table"><thead><tr><th>Métrica</th>${monthNames.map((month) => `<th>${month}</th>`).join('')}${showProjection ? `<th class="projection-column">Estimado ${monthNames[projection.month - 1]}</th>` : ''}</tr></thead><tbody>${Object.entries(metricConfig).map(([type, config]) => `<tr><td><strong>${escapeHtml(config.label)}</strong></td>${monthNames.map((_, index) => `<td>${formatMetric(metricValue(type, index + 1), config.money)}</td>`).join('')}${showProjection ? `<td class="projection-column">${formatMetric(type === 'revenue' ? projection.estimatedRevenue : type === 'units' ? projection.estimatedUnits : projection.estimatedAsp, config.money)}</td>` : ''}</tr>`).join('')}</tbody></table></div>
+    ${showProjection ? `<p class="projection-note">Proyección sobre ${projection.daysCovered} de ${projection.totalDays} días contemplados.</p>` : ''}
   `;
   drawMetricsChart();
+}
+
+async function openMonthEditor() {
+  const period = detail.currentPeriodSummary;
+  const year = period?.year || new Date().getFullYear();
+  const month = period?.month || new Date().getMonth() + 1;
+  try {
+    const data = await api(`/api/clients/${encodeURIComponent(clientId)}/months/${year}/${month}`);
+    const weeks = data.weeks.map((week) => ({ ...week }));
+    if (!data.hasWeeklyDetail && data.existingMonthly.revenue + data.existingMonthly.units > 0) {
+      weeks[0].revenue = data.existingMonthly.revenue;
+      weeks[0].units = data.existingMonthly.units;
+    }
+    const overlay = openModal(`<div class="modal-overlay"><form class="modal month-editor-modal"><div class="modal-header">Editar ${monthNames[month - 1]} ${year}</div>
+      ${!data.hasWeeklyDetail && data.existingMonthly.revenue + data.existingMonthly.units > 0 ? '<div class="month-editor-notice">El total mensual existente se colocó en Semana 1 para conservarlo. Podés redistribuirlo entre las semanas.</div>' : ''}
+      <div class="form-group"><label>Días contemplados</label><input class="form-control" id="days-covered" type="number" min="0" max="${data.totalDays}" value="${data.daysCovered}"><small>El mes tiene ${data.totalDays} días.</small></div>
+      <div class="weekly-metrics-editor"><div class="weekly-metrics-head"><span>Semana</span><span>Facturación</span><span>Unidades</span><span>ASP automático</span></div>${weeks.map((week) => `<div class="weekly-metrics-row"><strong>Semana ${week.week}</strong><input class="form-control" type="number" min="0" step="any" data-week-revenue value="${week.revenue}"><input class="form-control" type="number" min="0" step="1" data-week-units value="${week.units}"><span data-week-asp>$ 0</span></div>`).join('')}</div>
+      <div class="month-editor-totals"><div><span>Facturación acumulada</span><strong data-total-revenue></strong></div><div><span>Unidades acumuladas</span><strong data-total-units></strong></div><div><span>ASP mensual</span><strong data-total-asp></strong></div></div>
+      <div class="modal-actions"><button class="btn btn-secondary" type="button" data-close-modal>Cancelar</button><button class="btn" type="submit">Guardar</button></div></form></div>`);
+    const updateTotals = () => {
+      let revenue = 0; let units = 0;
+      overlay.querySelectorAll('.weekly-metrics-row').forEach((row) => {
+        const rowRevenue = Number(row.querySelector('[data-week-revenue]').value || 0);
+        const rowUnits = Number(row.querySelector('[data-week-units]').value || 0);
+        revenue += rowRevenue; units += rowUnits;
+        row.querySelector('[data-week-asp]').textContent = formatPlainMetric(rowUnits > 0 ? rowRevenue / rowUnits : 0, true);
+      });
+      overlay.querySelector('[data-total-revenue]').textContent = formatPlainMetric(revenue, true);
+      overlay.querySelector('[data-total-units]').textContent = formatPlainMetric(units, false);
+      overlay.querySelector('[data-total-asp]').textContent = formatPlainMetric(units > 0 ? revenue / units : 0, true);
+    };
+    overlay.querySelectorAll('input').forEach((input) => input.addEventListener('input', updateTotals));
+    updateTotals();
+    overlay.querySelector('form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const submit = overlay.querySelector('button[type="submit"]');
+      submit.disabled = true; submit.textContent = 'Guardando...';
+      const payloadWeeks = [...overlay.querySelectorAll('.weekly-metrics-row')].map((row) => ({ revenue: Number(row.querySelector('[data-week-revenue]').value || 0), units: Number(row.querySelector('[data-week-units]').value || 0) }));
+      try {
+        await api(`/api/clients/${encodeURIComponent(clientId)}/months/${year}/${month}`, { method: 'PUT', body: JSON.stringify({ daysCovered: Number(overlay.querySelector('#days-covered').value), weeks: payloadWeeks }) });
+        closeModal();
+        await reloadDetail();
+      } catch (error) { alert(error.message); submit.disabled = false; submit.textContent = 'Guardar'; }
+    });
+  } catch (error) { alert(error.message); }
 }
 
 function drawMetricsChart() {
@@ -233,6 +282,11 @@ function renderCards() {
 function formatMetric(value, money) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return '<span class="metric-empty">—</span>';
   return `${money ? '$ ' : ''}${Number(value).toLocaleString('es-AR', { maximumFractionDigits: 2 })}`;
+}
+
+function formatPlainMetric(value, money) {
+  const number = Number(value || 0);
+  return `${money ? '$ ' : ''}${number.toLocaleString('es-AR', { maximumFractionDigits: 2 })}`;
 }
 function compactNumber(value) { return Number(value).toLocaleString('es-AR', { notation: 'compact', maximumFractionDigits: 1 }); }
 function formatDate(value) { return new Date(value).toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' }); }

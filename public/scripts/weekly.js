@@ -10,6 +10,7 @@ if (!reportId) window.location.href = '/templates';
 let state;
 let report = null;
 let clientData = [];
+let clientSummaries = [];
 let calendarEvents = [];
 let selectedClientIds = new Set();
 let charts = [];
@@ -25,6 +26,7 @@ async function loadReport() {
   const data = await api(`/api/weekly-reports/${reportId}`);
   report = data.report;
   clientData = data.clientData || [];
+  clientSummaries = data.clientSummaries || [];
   calendarEvents = data.calendarEvents || [];
 }
 
@@ -51,7 +53,6 @@ function getFilteredClients() {
 function renderPage() {
   renderSidebar({ state, currentUser, activePage: 'templates', onRefresh: () => refreshAppState().then(s => { state = s; renderPage(); }) });
   renderToolbar();
-  renderClientFilter();
   renderSlides();
 }
 
@@ -69,7 +70,6 @@ function renderToolbar() {
     <div class="weekly-toolbar-actions">
       <button class="btn btn-secondary" type="button" id="export-pdf-btn">Exportar PDF</button>
       ${isEditable() ? `
-        <button class="btn btn-secondary" type="button" id="toggle-filter-btn">Filtrar Clientes</button>
         <button class="btn btn-secondary" type="button" id="save-draft-btn">Guardar Borrador</button>
         <button class="btn" type="button" id="finalize-btn">Guardado Final</button>
       ` : ''}
@@ -83,10 +83,6 @@ function renderToolbar() {
   if (isEditable()) {
     document.querySelector('#save-draft-btn').addEventListener('click', saveDraft);
     document.querySelector('#finalize-btn').addEventListener('click', finalize);
-    document.querySelector('#toggle-filter-btn').addEventListener('click', () => {
-      const panel = document.querySelector('#client-filter-panel');
-      if (panel) panel.classList.toggle('hidden');
-    });
   }
 }
 
@@ -142,26 +138,6 @@ function renderClientFilter() {
 }
 
 // --- Save / Finalize ---
-
-function collectClientData() {
-  const result = [];
-  document.querySelectorAll('[data-client-metric]').forEach(input => {
-    const clientId = input.dataset.clientId;
-    const metricType = input.dataset.metricType;
-    const field = input.dataset.field;
-    const value = input.value.trim() === '' ? null : Number(input.value);
-    let existing = result.find(d => d.clientId === clientId && d.metricType === metricType);
-    if (!existing) {
-      const saved = clientData.find(d => d.clientId === clientId && d.metricType === metricType);
-      existing = { id: saved?.id || undefined, clientId, metricType, currentValue: null, previousValue: null, ytdValue: null };
-      result.push(existing);
-    }
-    if (field === 'current') existing.currentValue = value;
-    if (field === 'previous') existing.previousValue = value;
-    if (field === 'ytd') existing.ytdValue = value;
-  });
-  return result;
-}
 
 function collectNotes() {
   const notes = [];
@@ -230,8 +206,7 @@ async function saveDraft() {
       body: JSON.stringify({
         daysElapsed,
         notes: collectNotes(),
-        meetings,
-        clientData: collectClientData()
+        meetings
       })
     });
     await loadReport();
@@ -298,9 +273,7 @@ function renderCoverSlide(editable) {
         <input type="text" class="date-input" value="${escapeHtml(report.weekLabel)}" ${editable ? '' : 'disabled'}>
       </div>
       <div class="weekly-cover-meta">
-        <span>Dias del mes transcurridos:</span>
-        <input type="number" id="days-elapsed" value="${report.daysElapsed}" ${editable ? '' : 'disabled'}>
-        <span>/ 30</span>
+        <span>Métricas sincronizadas desde Clientes</span>
       </div>
     </div>
   `;
@@ -342,7 +315,7 @@ function renderClientUpdateSlide(clients) {
 
 // --- Slide: Client Plan (editable metrics with rowspan) ---
 
-function renderClientPlanSlide(clients, editable) {
+function renderClientPlanSlide(clients) {
   const metricLabels = { revenue: 'Real ($)', units: 'Real (u)', asp: 'Real (ASP)' };
   const metrics = ['revenue', 'units', 'asp'];
 
@@ -367,23 +340,16 @@ function renderClientPlanSlide(clients, editable) {
               const current = d?.currentValue ?? '';
               const previous = d?.previousValue ?? '';
               const ytd = d?.ytdValue ?? '';
-              const days = report.daysElapsed || 25;
-              const estimated = current !== '' && days > 0 ? Math.round((Number(current) / days) * 30) : '';
+              const estimated = d?.estimatedValue ?? '';
               const prefix = (metric === 'revenue' || metric === 'asp') ? '$' : '';
               return `
                 <tr>
-                  ${mi === 0 ? `<td rowspan="3"><strong>${escapeHtml(c.company || c.name)}</strong></td>` : ''}
+                  ${mi === 0 ? `<td rowspan="3"><strong>${escapeHtml(c.company || c.name)}</strong>${renderWeeklyBreakdown(c.id)}</td>` : ''}
                   <td>${metricLabels[metric]}</td>
-                  <td>${editable
-                    ? `<td class="editable-cell"><input data-client-metric data-client-id="${c.id}" data-metric-type="${metric}" data-field="previous" value="${previous}" step="any"></td>`
-                    : `<td>${previous !== '' ? prefix + Number(previous).toLocaleString('es-AR') : '-'}</td>`}
-                  <td class="editable-cell">${editable
-                    ? `<input data-client-metric data-client-id="${c.id}" data-metric-type="${metric}" data-field="current" value="${current}" step="any">`
-                    : `${current !== '' ? prefix + Number(current).toLocaleString('es-AR') : '-'}`}</td>
+                  <td>${previous !== '' ? prefix + Number(previous).toLocaleString('es-AR', { maximumFractionDigits: 0 }) : '-'}</td>
+                  <td>${current !== '' ? prefix + Number(current).toLocaleString('es-AR', { maximumFractionDigits: 0 }) : '-'}</td>
                   <td class="highlight-cell" data-estimated-for="${c.id}-${metric}">${estimated !== '' ? prefix + Number(estimated).toLocaleString('es-AR') : '-'}</td>
-                  ${editable
-                    ? `<td class="editable-cell"><input data-client-metric data-client-id="${c.id}" data-metric-type="${metric}" data-field="ytd" value="${ytd}" step="any"></td>`
-                    : `<td>${ytd !== '' ? prefix + Number(ytd).toLocaleString('es-AR') : '-'}</td>`}
+                  <td>${ytd !== '' ? prefix + Number(ytd).toLocaleString('es-AR', { maximumFractionDigits: 0 }) : '-'}</td>
                 </tr>
               `;
             }).join('')).join('')}
@@ -392,6 +358,12 @@ function renderClientPlanSlide(clients, editable) {
       </div>
     </div>
   `;
+}
+
+function renderWeeklyBreakdown(clientId) {
+  const weeks = clientSummaries.find((item) => item.clientId === clientId)?.weeks || [];
+  if (!weeks.length) return '<small class="weekly-breakdown empty">Sin detalle semanal</small>';
+  return `<div class="weekly-breakdown">${weeks.map((week) => `<span>S${week.week}: $${Number(week.revenue).toLocaleString('es-AR', { maximumFractionDigits: 0 })} · ${Number(week.units).toLocaleString('es-AR')} u.</span>`).join('')}</div>`;
 }
 
 // --- Slide: Meetings (time-based grid with real calendar events) ---
@@ -476,11 +448,13 @@ function renderClientStatusSlides(clients, editable) {
     // One status slide per client within the group
     group.forEach(c => {
       const novedades = report.meetings?.clientNovedades?.[c.id] || [];
+      const sourceComment = clientSummaries.find((item) => item.clientId === c.id)?.lastComment;
       html += `
         <div class="weekly-slide">
           <h2 class="weekly-slide-title">Estado Cliente | ${escapeHtml(c.company || c.name)} | ${escapeHtml(consultor)}</h2>
           <div class="weekly-content-box weekly-client-status-grid">
             <div class="weekly-client-novedades">
+              ${sourceComment ? `<div class="weekly-source-comment"><span>Último comentario de reunión</span><p>${escapeHtml(sourceComment.content)}</p><small>${escapeHtml(sourceComment.author_name || '')} · ${new Date(sourceComment.created_at).toLocaleDateString('es-AR')}</small></div>` : '<div class="weekly-source-comment empty"><span>Sin comentarios de reunión</span></div>'}
               ${editable ? `<button class="btn-slide btn-slide-add" type="button" data-add-novedad="${c.id}">+ Agregar Novedad</button>` : ''}
               <div data-client-novedades="${c.id}">
                 ${novedades.map(n => renderNovedadItem(n, editable)).join('')}
@@ -687,36 +661,6 @@ function initCharts(clients) {
 function setupDynamicListeners() {
   const editable = isEditable();
   if (!editable) return;
-
-  // Estimated cell recalculation
-  document.querySelectorAll('[data-client-metric][data-field="current"]').forEach(input => {
-    input.addEventListener('input', () => {
-      const clientId = input.dataset.clientId;
-      const metricType = input.dataset.metricType;
-      const daysEl = document.querySelector('#days-elapsed');
-      const days = daysEl ? Number(daysEl.value) || 25 : 25;
-      const val = input.value.trim() === '' ? null : Number(input.value);
-      const cell = document.querySelector(`[data-estimated-for="${clientId}-${metricType}"]`);
-      if (!cell) return;
-      if (val !== null && days > 0) {
-        const est = Math.round((val / days) * 30);
-        const prefix = (metricType === 'revenue' || metricType === 'asp') ? '$' : '';
-        cell.textContent = prefix + est.toLocaleString('es-AR');
-      } else {
-        cell.textContent = '-';
-      }
-    });
-  });
-
-  // Recalculate estimates when days elapsed changes
-  const daysEl = document.querySelector('#days-elapsed');
-  if (daysEl) {
-    daysEl.addEventListener('input', () => {
-      document.querySelectorAll('[data-client-metric][data-field="current"]').forEach(input => {
-        input.dispatchEvent(new Event('input'));
-      });
-    });
-  }
 
   // Add free trial row
   const addFtBtn = document.querySelector('#add-ft-row');

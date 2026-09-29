@@ -1,6 +1,6 @@
 import { api, requireSession } from './api.js';
 import { loadAppState, refreshAppState } from './app-state.js';
-import { renderSidebar } from './layout.js';
+import { openModal, renderSidebar } from './layout.js';
 import { escapeHtml } from './utils.js';
 
 const currentUser = requireSession();
@@ -56,21 +56,32 @@ async function createNewWeekly() {
   const month = String(now.getMonth() + 1).padStart(2, '0');
   const weekLabel = `${day}/${month}`;
 
-  const btn = document.querySelector('#create-weekly-btn');
-  btn.disabled = true;
-  btn.textContent = 'Creando...';
-
-  try {
-    const { report } = await api('/api/weekly-reports', {
-      method: 'POST',
-      body: JSON.stringify({ weekLabel })
-    });
-    window.location.href = `/weekly?id=${report.id}`;
-  } catch (err) {
-    btn.disabled = false;
-    btn.textContent = 'Crear nueva weekly';
-    alert(err.message);
-  }
+  const clients = [...(state.clients || [])].sort((a, b) => (a.company || a.name).localeCompare(b.company || b.name, 'es'));
+  const overlay = openModal(`
+    <div class="modal-overlay"><form class="modal weekly-create-modal">
+      <div class="modal-header">Crear nueva Weekly</div>
+      <div class="form-group"><label>Fecha / etiqueta</label><input class="form-control" id="weekly-label-input" value="${weekLabel}"></div>
+      <div class="form-group"><label>Clientes incluidos</label><p class="form-hint">Las métricas y el último comentario se completan automáticamente desde Clientes.</p>
+        <div class="weekly-create-clients">${clients.map((client) => `<label><input type="checkbox" data-weekly-client value="${escapeHtml(client.id)}"><span>${escapeHtml(client.company || client.name)}</span>${client.status ? `<small>${escapeHtml(client.status)}</small>` : ''}</label>`).join('')}</div>
+      </div>
+      <div class="modal-actions"><button class="btn btn-secondary" type="button" data-close-modal>Cancelar</button><button class="btn" type="submit">Crear Weekly</button></div>
+    </form></div>`);
+  overlay.querySelector('form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const clientIds = [...overlay.querySelectorAll('[data-weekly-client]:checked')].map((input) => input.value);
+    if (!clientIds.length) return alert('Selecciona al menos un cliente');
+    const submit = overlay.querySelector('button[type="submit"]');
+    submit.disabled = true;
+    submit.textContent = 'Creando...';
+    try {
+      const { report } = await api('/api/weekly-reports', { method: 'POST', body: JSON.stringify({ weekLabel: overlay.querySelector('#weekly-label-input').value.trim(), clientIds }) });
+      window.location.href = `/weekly?id=${report.id}`;
+    } catch (err) {
+      submit.disabled = false;
+      submit.textContent = 'Crear Weekly';
+      alert(err.message);
+    }
+  });
 }
 
 function renderWeeklyList() {
