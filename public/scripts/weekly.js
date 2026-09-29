@@ -601,8 +601,9 @@ function initCharts(clients) {
     const canvas = document.getElementById(`chart-${c.id}`);
     if (!canvas) return;
     const summary = getClientSummary(c.id);
+    const hasHistoryPayload = Array.isArray(summary?.monthlyHistory);
     let history = summary?.monthlyHistory || [];
-    if (!history.length) {
+    if (!hasHistoryPayload) {
       const revenue = clientData.find((item) => String(item.clientId) === String(c.id) && item.metricType === 'revenue');
       const units = clientData.find((item) => String(item.clientId) === String(c.id) && item.metricType === 'units');
       const year = Number(summary?.year || new Date().getFullYear());
@@ -616,7 +617,7 @@ function initCharts(clients) {
         ];
       }
     }
-    if (!history.length) {
+    if (!history.some((item) => item.revenue !== null || item.units !== null)) {
       canvas.replaceWith(Object.assign(document.createElement('p'), { className: 'weekly-chart-empty', textContent: 'Sin métricas mensuales cargadas para este cliente.' }));
       return;
     }

@@ -110,7 +110,7 @@ async function getClientPeriodSummaries(clientIds, year, month) {
   const previousMonth = month === 1 ? 12 : month - 1;
   const previousYear = month === 1 ? year - 1 : year;
   const [metrics, progress, comments, weeklyMetrics] = await Promise.all([
-    supabaseRest(`/client_monthly_metrics?select=client_id,year,month,metric_type,value&client_id=in.(${encodeURIComponent(encodedIds)})&or=(and(year.eq.${year},month.eq.${month}),and(year.eq.${previousYear},month.eq.${previousMonth}),and(year.eq.${year},month.lte.${month}))`),
+    supabaseRest(`/client_monthly_metrics?select=client_id,year,month,metric_type,value&client_id=in.(${encodeURIComponent(encodedIds)})&year=in.(${year - 1},${year})&order=year.asc,month.asc`),
     supabaseRest(`/client_month_progress?select=client_id,days_covered&client_id=in.(${encodeURIComponent(encodedIds)})&year=eq.${year}&month=eq.${month}`),
     supabaseRest(`/client_comments?select=id,client_id,content,author_name,created_at&client_id=in.(${encodeURIComponent(encodedIds)})&order=created_at.desc`),
     supabaseRest(`/client_weekly_metrics?select=client_id,week,revenue,units&client_id=in.(${encodeURIComponent(encodedIds)})&year=eq.${year}&month=eq.${month}&order=week.asc`)
@@ -125,9 +125,10 @@ async function getClientPeriodSummaries(clientIds, year, month) {
     const totalDays = daysInMonth(year, month);
     const estimatedRevenue = daysCovered > 0 ? revenue / daysCovered * totalDays : revenue;
     const estimatedUnits = daysCovered > 0 ? Math.round(units / daysCovered * totalDays) : Math.round(units);
-    const historyMonths = [...new Set(derived
-      .filter((item) => item.clientId === clientId && item.year === year && item.month <= month)
-      .map((item) => item.month))].sort((a, b) => a - b);
+    const historyPeriods = Array.from({ length: 6 }, (_, index) => {
+      const date = new Date(Date.UTC(year, month - 1 - (5 - index), 1));
+      return { year: date.getUTCFullYear(), month: date.getUTCMonth() + 1 };
+    });
     return {
       clientId, year, month, daysCovered, totalDays, revenue, units, asp,
       previousRevenue: value('revenue', previousYear, previousMonth),
@@ -137,12 +138,13 @@ async function getClientPeriodSummaries(clientIds, year, month) {
       estimatedRevenue,
       estimatedUnits,
       estimatedAsp: estimatedUnits > 0 ? estimatedRevenue / estimatedUnits : 0,
-      monthlyHistory: historyMonths.map((historyMonth) => {
-        const historyRevenue = value('revenue', year, historyMonth);
-        const historyUnits = value('units', year, historyMonth);
+      monthlyHistory: historyPeriods.map((period) => {
+        const hasData = metrics.some((item) => item.client_id === clientId && Number(item.year) === period.year && Number(item.month) === period.month && ['revenue', 'units'].includes(item.metric_type));
+        const historyRevenue = hasData ? value('revenue', period.year, period.month) : null;
+        const historyUnits = hasData ? value('units', period.year, period.month) : null;
         return {
-          year, month: historyMonth, revenue: historyRevenue, units: historyUnits,
-          asp: historyUnits > 0 ? historyRevenue / historyUnits : 0
+          ...period, revenue: historyRevenue, units: historyUnits,
+          asp: historyUnits > 0 ? historyRevenue / historyUnits : null
         };
       }),
       weeks: weeklyMetrics.filter((item) => item.client_id === clientId).map((item) => ({
