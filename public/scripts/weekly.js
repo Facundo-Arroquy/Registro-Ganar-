@@ -1,4 +1,4 @@
-import { api, requireSession } from './api.js';
+import { api, requireSession } from './api.js?v=weekly-6m';
 import { loadAppState, refreshAppState } from './app-state.js';
 import { renderSidebar } from './layout.js';
 import { escapeHtml } from './utils.js';
@@ -23,7 +23,7 @@ async function boot() {
 }
 
 async function loadReport() {
-  const data = await api(`/api/weekly-reports/${reportId}`);
+  const data = await api(`/api/weekly-reports/${reportId}?metricsWindow=6`);
   report = data.report;
   clientData = data.clientData || [];
   clientSummaries = data.clientSummaries || [];
