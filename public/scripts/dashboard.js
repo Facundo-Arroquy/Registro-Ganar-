@@ -79,7 +79,7 @@ function renderDashboard() {
   }
 
   document.querySelector('#clients-table-body').innerHTML = enriched.length ? enriched.map(({ client, cards: clientCards, timedCards, timeBankSeconds, owner, links }) => `
-    <tr class="editable-row" data-edit-client="${escapeHtml(client.id)}">
+    <tr class="editable-row" data-view-client="${escapeHtml(client.id)}">
       <td><strong>${escapeHtml(client.name)}</strong></td>
       <td>${escapeHtml(client.company)}</td>
       <td>${renderEmails(client.email)}</td>
@@ -93,7 +93,7 @@ function renderDashboard() {
       <td><span class="card-count">${clientCards.length} tareas</span></td>
       <td><span class="card-count">${timedCards.length} tags</span></td>
       <td>${timeBankSeconds ? `<span class="time-badge">${escapeHtml(formatDuration(timeBankSeconds))}</span>` : '<span style="color: var(--text-muted);">0m</span>'}</td>
-      <td><button class="btn btn-secondary btn-sm" type="button" data-edit-client-button="${escapeHtml(client.id)}">Editar</button></td>
+      <td><button class="btn btn-secondary btn-sm" type="button" data-edit-client-button="${escapeHtml(client.id)}" data-stop-row-click>Editar</button></td>
     </tr>
   `).join('') : '<tr><td colspan="14" class="empty-table-message">No hay clientes con este estado.</td></tr>';
 
@@ -117,10 +117,10 @@ function renderDashboard() {
     };
   });
 
-  document.querySelectorAll('[data-edit-client]').forEach((row) => {
+  document.querySelectorAll('[data-view-client]').forEach((row) => {
     row.addEventListener('click', (event) => {
       if (event.target.closest('[data-stop-row-click]')) return;
-      openClientModal(getClientById(row.dataset.editClient));
+      window.location.href = `/cliente?id=${encodeURIComponent(row.dataset.viewClient)}`;
     });
   });
   document.querySelectorAll('[data-edit-client-button]').forEach((button) => {

@@ -1324,6 +1324,105 @@ async function handleApi(req, res, url) {
     const client = await getSupabaseClient(requestedClientId);
     if (!client) return sendError(res, 404, 'Cliente no encontrado');
 
+    if (req.method === 'GET' && segments[3] === 'detail' && segments.length === 4) {
+      const encodedClientId = encodeURIComponent(client.id);
+      const [links, metrics, reports, calendarEvents, cards, manualComments] = await Promise.all([
+        supabaseRest(`/client_links?select=id,url,label&client_id=eq.${encodedClientId}&order=created_at.asc`),
+        supabaseRest(`/client_monthly_metrics?select=id,year,month,metric_type,value&client_id=eq.${encodedClientId}&order=year.desc,month.asc`).catch((error) => {
+          if (/client_monthly_metrics|schema cache/i.test(error.message)) return [];
+          throw error;
+        }),
+        supabaseRest('/weekly_reports?select=id,week_label,status,meetings,created_at,updated_at&order=created_at.desc'),
+        supabaseRest(`/calendar_events?select=id,title,starts_at,duration_minutes,notes,recurrence_unit,recurrence_interval,recurrence_until&client_id=eq.${encodedClientId}&order=starts_at.desc`),
+        supabaseRest(`/cards?select=id,board_id,column_id,title,description,due_date,assigned_to,entered_column_at,updated_at&client_id=eq.${encodedClientId}&order=updated_at.desc`),
+        supabaseRest(`/client_comments?select=id,content,created_by,author_name,created_at,updated_at&client_id=eq.${encodedClientId}&order=created_at.desc`).catch((error) => {
+          if (/client_comments|schema cache/i.test(error.message)) return [];
+          throw error;
+        })
+      ]);
+      const comments = reports.flatMap((report) => {
+        const novedades = report.meetings?.clientNovedades?.[client.id];
+        if (!Array.isArray(novedades)) return [];
+        return novedades.filter((item) => item?.title || item?.description).map((item, index) => ({
+          id: `${report.id}-${index}`,
+          title: String(item.title || 'Comentario'),
+          description: String(item.description || ''),
+          weekLabel: report.week_label,
+          date: report.updated_at || report.created_at,
+          reportId: report.id
+        }));
+      });
+      return sendJson(res, 200, {
+        client: { ...client, links },
+        metrics: metrics.map((item) => ({ id: item.id, year: item.year, month: item.month, metricType: item.metric_type, value: item.value === null ? null : Number(item.value) })),
+        comments,
+        manualComments: manualComments.map((item) => ({
+          id: item.id,
+          content: item.content,
+          createdBy: item.created_by || '',
+          authorName: item.author_name,
+          createdAt: item.created_at,
+          updatedAt: item.updated_at
+        })),
+        meetings: calendarEvents.map((item) => ({
+          id: item.id, title: item.title, startsAt: item.starts_at, durationMinutes: item.duration_minutes,
+          notes: item.notes || '', recurrenceUnit: item.recurrence_unit || '',
+          recurrenceInterval: item.recurrence_interval, recurrenceUntil: item.recurrence_until || ''
+        })),
+        cards: cards.map((item) => ({
+          id: item.id, boardId: item.board_id, columnId: item.column_id, title: item.title,
+          description: item.description || '', dueDate: item.due_date || '', assignedTo: item.assigned_to || '',
+          enteredColumnAt: item.entered_column_at
+        }))
+      });
+    }
+
+    if (req.method === 'POST' && segments[3] === 'comments' && segments.length === 4) {
+      const content = String(body.content || '').trim();
+      if (!content) return sendError(res, 400, 'El comentario no puede estar vacio');
+      if (content.length > 10000) return sendError(res, 400, 'El comentario no puede superar los 10.000 caracteres');
+      const comment = {
+        id: makeId('cc'), client_id: client.id, content,
+        created_by: apiUser.id, author_name: apiUser.name
+      };
+      const [created] = await supabaseRest('/client_comments', {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify([comment])
+      });
+      recordAuditInBackground(body, `Agrego un comentario a "${client.company}"`);
+      return sendJson(res, 201, { comment: {
+        id: created.id, content: created.content, createdBy: created.created_by || '',
+        authorName: created.author_name, createdAt: created.created_at, updatedAt: created.updated_at
+      } });
+    }
+
+    if (segments[3] === 'comments' && segments[4] && segments.length === 5) {
+      const commentId = segments[4];
+      const rows = await supabaseRest(`/client_comments?select=id,content&client_id=eq.${encodeURIComponent(client.id)}&id=eq.${encodeURIComponent(commentId)}&limit=1`);
+      if (!rows.length) return sendError(res, 404, 'Comentario no encontrado');
+      if (req.method === 'PATCH') {
+        const content = String(body.content || '').trim();
+        if (!content) return sendError(res, 400, 'El comentario no puede estar vacio');
+        if (content.length > 10000) return sendError(res, 400, 'El comentario no puede superar los 10.000 caracteres');
+        const [updated] = await supabaseRest(`/client_comments?id=eq.${encodeURIComponent(commentId)}&client_id=eq.${encodeURIComponent(client.id)}`, {
+          method: 'PATCH',
+          headers: { Prefer: 'return=representation' },
+          body: JSON.stringify({ content })
+        });
+        recordAuditInBackground(body, `Edito un comentario de "${client.company}"`);
+        return sendJson(res, 200, { comment: {
+          id: updated.id, content: updated.content, createdBy: updated.created_by || '',
+          authorName: updated.author_name, createdAt: updated.created_at, updatedAt: updated.updated_at
+        } });
+      }
+      if (req.method === 'DELETE') {
+        await supabaseRest(`/client_comments?id=eq.${encodeURIComponent(commentId)}&client_id=eq.${encodeURIComponent(client.id)}`, { method: 'DELETE' });
+        recordAuditInBackground(body, `Elimino un comentario de "${client.company}"`);
+        return sendJson(res, 200, { deleted: true });
+      }
+    }
+
     if (req.method === 'PATCH' && segments.length === 3) {
       const payload = {
         name: body.name === undefined ? client.name : String(body.name).trim(),
@@ -1828,6 +1927,8 @@ async function serveStatic(req, res, url) {
     '/login': 'login.html',
     '/kanban': 'kanban.html',
     '/dashboard': 'dashboard.html',
+    '/clientes': 'clientes.html',
+    '/cliente': 'cliente.html',
     '/configuracion': 'configuracion.html',
     '/tableros': 'tableros.html',
     '/calendarios': 'calendarios.html',

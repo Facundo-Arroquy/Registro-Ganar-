@@ -6,6 +6,7 @@ export function renderSidebar({ state, currentUser, activePage, onRefresh }) {
   sidebar.innerHTML = `
     <a class="logo" href="/dashboard">WIM</a>
     <a class="nav-btn ${activePage === 'dashboard' ? 'active' : ''}" href="/dashboard">Dashboard</a>
+    <a class="nav-btn ${activePage === 'clientes' ? 'active' : ''}" href="/clientes">Clientes</a>
 
     <a class="nav-btn ${activePage === 'tableros' ? 'active' : ''}" href="/tableros">Tableros</a>
     <a class="nav-btn ${activePage === 'calendarios' ? 'active' : ''}" href="/calendarios">Calendarios</a>
