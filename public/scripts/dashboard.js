@@ -7,7 +7,7 @@ const currentUser = requireSession();
 let state;
 let sortColumn = null;
 let sortDirection = 'asc';
-let selectedStatus = '';
+let selectedStatus = 'Plan Activo';
 
 async function boot() {
   state = await loadAppState();
@@ -38,6 +38,20 @@ function renderDashboard() {
   const cards = state.boards.flatMap((board) => board.cards);
   document.querySelector('#stat-active-cards').textContent = cards.length;
   document.querySelector('#stat-expired-cards').textContent = cards.filter((card) => getDueDateStatus(card.dueDate)?.status === 'expired').length;
+
+  // Status counts
+  const statusCounts = {};
+  state.clients.forEach(c => {
+    const s = c.status || 'Activo';
+    statusCounts[s] = (statusCounts[s] || 0) + 1;
+  });
+  const countsRow = document.querySelector('#status-counts-row');
+  if (countsRow) {
+    countsRow.innerHTML = Object.entries(statusCounts)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([status, count]) => `<div class="status-count-chip"><span class="status-count-label">${escapeHtml(status)}</span><span class="status-count-value">${count}</span></div>`)
+      .join('');
+  }
 
   const enriched = state.clients
     .filter((client) => !selectedStatus || (client.status || 'Activo') === selectedStatus)
