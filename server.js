@@ -44,7 +44,7 @@ async function loadEnv() {
 }
 
 function sendJson(res, status, data) {
-  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
   res.end(JSON.stringify(data));
 }
 
@@ -2085,7 +2085,7 @@ async function serveStatic(req, res, url) {
   }
 
   const ext = path.extname(normalizedPath);
-  res.writeHead(200, { 'Content-Type': contentTypes[ext] || 'application/octet-stream' });
+  res.writeHead(200, { 'Content-Type': contentTypes[ext] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
   res.end(await readFile(normalizedPath));
 }
 

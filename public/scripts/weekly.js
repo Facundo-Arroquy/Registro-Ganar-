@@ -50,6 +50,10 @@ function getFilteredClients() {
   return (state.clients || []).filter(c => selectedClientIds.has(c.id));
 }
 
+function getClientSummary(clientId) {
+  return clientSummaries.find((item) => String(item.clientId) === String(clientId));
+}
+
 function isFreeTrialClient(client) {
   return String(client?.status || '').trim().toLowerCase().replaceAll(' ', '') === 'freetrial';
 }
@@ -340,7 +344,7 @@ function renderClientPlanSlide(clients) {
           </thead>
           <tbody>
             ${clients.map(c => metrics.map((metric, mi) => {
-              const d = clientData.find(x => x.clientId === c.id && x.metricType === metric);
+              const d = clientData.find(x => String(x.clientId) === String(c.id) && x.metricType === metric);
               const current = d?.currentValue ?? '';
               const previous = d?.previousValue ?? '';
               const ytd = d?.ytdValue ?? '';
@@ -365,7 +369,7 @@ function renderClientPlanSlide(clients) {
 }
 
 function renderWeeklyBreakdown(clientId) {
-  const weeks = clientSummaries.find((item) => item.clientId === clientId)?.weeks || [];
+  const weeks = getClientSummary(clientId)?.weeks || [];
   if (!weeks.length) return '<small class="weekly-breakdown empty">Sin detalle semanal</small>';
   return `<div class="weekly-breakdown">${weeks.map((week) => `<span>S${week.week}: $${Number(week.revenue).toLocaleString('es-AR', { maximumFractionDigits: 0 })} · ${Number(week.units).toLocaleString('es-AR')} u.</span>`).join('')}</div>`;
 }
@@ -444,7 +448,7 @@ function renderClientStatusSlides(clients, editable) {
     const group = groups[consultor];
     group.forEach(c => {
       const novedades = report.meetings?.clientNovedades?.[c.id] || [];
-      const sourceComment = clientSummaries.find((item) => item.clientId === c.id)?.lastComment;
+      const sourceComment = getClientSummary(c.id)?.lastComment;
       html += `
         <div class="weekly-slide">
           <h2 class="weekly-slide-title">Estado Cliente | ${escapeHtml(c.company || c.name)} | ${escapeHtml(consultor)}</h2>
@@ -596,7 +600,22 @@ function initCharts(clients) {
   clients.forEach(c => {
     const canvas = document.getElementById(`chart-${c.id}`);
     if (!canvas) return;
-    const history = clientSummaries.find((item) => item.clientId === c.id)?.monthlyHistory || [];
+    const summary = getClientSummary(c.id);
+    let history = summary?.monthlyHistory || [];
+    if (!history.length) {
+      const revenue = clientData.find((item) => String(item.clientId) === String(c.id) && item.metricType === 'revenue');
+      const units = clientData.find((item) => String(item.clientId) === String(c.id) && item.metricType === 'units');
+      const year = Number(summary?.year || new Date().getFullYear());
+      const month = Number(summary?.month || new Date().getMonth() + 1);
+      const previousMonth = month === 1 ? 12 : month - 1;
+      const previousYear = month === 1 ? year - 1 : year;
+      if (revenue || units) {
+        history = [
+          { year: previousYear, month: previousMonth, revenue: Number(revenue?.previousValue || 0), units: Number(units?.previousValue || 0) },
+          { year, month, revenue: Number(revenue?.currentValue || 0), units: Number(units?.currentValue || 0) }
+        ];
+      }
+    }
     if (!history.length) {
       canvas.replaceWith(Object.assign(document.createElement('p'), { className: 'weekly-chart-empty', textContent: 'Sin métricas mensuales cargadas para este cliente.' }));
       return;
