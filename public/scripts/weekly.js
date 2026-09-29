@@ -50,6 +50,10 @@ function getFilteredClients() {
   return (state.clients || []).filter(c => selectedClientIds.has(c.id));
 }
 
+function isFreeTrialClient(client) {
+  return String(client?.status || '').trim().toLowerCase().replaceAll(' ', '') === 'freetrial';
+}
+
 function renderPage() {
   renderSidebar({ state, currentUser, activePage: 'templates', onRefresh: () => refreshAppState().then(s => { state = s; renderPage(); }) });
   renderToolbar();
@@ -251,7 +255,7 @@ function renderSlides() {
     ${renderClientPlanSlide(clients, editable)}
     ${renderMeetingsSlide(editable)}
     ${renderClientStatusSlides(clients, editable)}
-    ${renderFreeTrialSlide(editable)}
+    ${clients.some(isFreeTrialClient) ? renderFreeTrialSlide(editable) : ''}
     ${renderNotesSlide(editable)}
     ${renderFinalSlide()}
   `;
@@ -435,17 +439,9 @@ function renderClientStatusSlides(clients, editable) {
 
   const consultorNames = Object.keys(groups).sort();
   let html = '';
-  let groupNum = 1;
 
   consultorNames.forEach(consultor => {
     const group = groups[consultor];
-    // One separator per consultor group
-    html += `
-      <div class="weekly-slide weekly-slide-separator">
-        <h1>${groupNum} ${escapeHtml(consultor)}</h1>
-      </div>
-    `;
-    // One status slide per client within the group
     group.forEach(c => {
       const novedades = report.meetings?.clientNovedades?.[c.id] || [];
       const sourceComment = clientSummaries.find((item) => item.clientId === c.id)?.lastComment;
@@ -467,7 +463,6 @@ function renderClientStatusSlides(clients, editable) {
         </div>
       `;
     });
-    groupNum++;
   });
 
   return html;

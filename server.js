@@ -1989,6 +1989,7 @@ async function handleApi(req, res, url) {
               supabaseRest('/calendar_event_exceptions?select=id,event_id,occurrence_starts_at,replacement_starts_at,replacement_duration_minutes,cancelled')
             ]);
             calendarEvents = events.flatMap(event => expandCalendarEvent(event, rangeStart, rangeEnd, eventUsers, eventExceptions))
+              .filter((event) => selectedClientIds.includes(String(event.clientId)))
               .sort((a, b) => a.startsAt.localeCompare(b.startsAt));
           }
         }

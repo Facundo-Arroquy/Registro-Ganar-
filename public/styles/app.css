@@ -2868,6 +2868,20 @@ header {
 
 .weekly-create-clients small { color: var(--text-muted); }
 
+.weekly-selection-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.weekly-selection-count {
+  margin: 10px 0 0;
+  color: var(--accent-blue-hover);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
 .month-editor-notice {
   margin-bottom: 15px;
   padding: 11px 13px;
