@@ -1,7 +1,7 @@
 import { api, requireSession } from './api.js';
 import { loadAppState, refreshAppState } from './app-state.js';
 import { closeModal, openModal, renderSidebar } from './layout.js';
-import { escapeHtml, getInitials } from './utils.js';
+import { escapeHtml, formatBankDuration, getInitials } from './utils.js';
 
 const currentUser = requireSession();
 const clientId = new URLSearchParams(window.location.search).get('id');
@@ -54,8 +54,10 @@ function renderPage() {
       ${infoItem('Consultor', client.consultor || 'Sin asignar')}
       ${client.complexity ? infoHtmlItem('Complejidad', renderConfiguredBadge('complexities', client.complexity)) : infoItem('Complejidad', 'Sin definir')}
       ${client.adStatus ? infoHtmlItem('Publicidad', renderConfiguredBadge('adStatuses', client.adStatus)) : infoItem('Publicidad', 'Sin definir')}
+      ${infoItem('Usuario de Mercado Libre', client.meliUser || 'Sin definir')}
+      ${infoItem('Categoría de VS', client.vsCategory || 'Sin definir')}
       ${infoItem('Reunión habitual', formatRecurringMeeting(client))}
-      ${infoItem('Banco de tiempo', formatDuration(client.timeBankSeconds))}
+      ${infoItem('Banco de tiempo', formatBankDuration(client.timeBankSeconds))}
     </section>
     ${renderLinks(client.links || [])}
     <section class="client-detail-section">
@@ -291,7 +293,6 @@ function formatPlainMetric(value, money) {
 function compactNumber(value) { return Number(value).toLocaleString('es-AR', { notation: 'compact', maximumFractionDigits: 1 }); }
 function formatDate(value) { return new Date(value).toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' }); }
 function formatDateTime(value) { return new Date(value).toLocaleString('es-AR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }); }
-function formatDuration(seconds) { const minutes = Math.floor(Number(seconds || 0) / 60); return minutes >= 60 ? `${Math.floor(minutes / 60)} h ${minutes % 60} min` : `${minutes} min`; }
 function formatRecurringMeeting(client) { const days = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado']; if (client.meetingDay === null || client.meetingDay === undefined) return 'Sin definir'; return `${days[client.meetingDay]} ${String(client.meetingTime || '').slice(0, 5)}${client.meetingFrequency ? ` · cada ${client.meetingFrequency} días` : ''}`; }
 
 boot().catch((error) => {

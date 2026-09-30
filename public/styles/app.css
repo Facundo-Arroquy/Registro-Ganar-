@@ -424,6 +424,23 @@ header {
   gap: 12px;
 }
 
+.board-header-actions,
+.board-client-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.board-client-filter span {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.board-client-filter .form-control {
+  min-width: 220px;
+  padding: 7px 10px;
+}
+
 .kanban-board {
   flex: 1;
   padding: 24px;
@@ -1586,6 +1603,22 @@ header {
 
 /* ── Tablet: ≤ 900px ── */
 @media (max-width: 900px) {
+  [data-page="kanban"] header {
+    height: auto;
+    min-height: 60px;
+    padding-block: 10px;
+    gap: 10px;
+  }
+
+  .board-header-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .board-client-filter .form-control {
+    min-width: 180px;
+  }
+
   aside {
     width: 240px;
     padding: 16px;

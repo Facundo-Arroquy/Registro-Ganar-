@@ -390,7 +390,7 @@ async function getSupabaseState() {
     getSupabaseComplexities(),
     getSupabaseAdStatuses(),
     supabaseRest('/settings_audit?select=action,user_id,user_name,created_at&order=created_at.desc&limit=50'),
-    supabaseRest('/clients?select=id,name,company,email,owner_id,status_id,consultor_id,complexity_id,ad_status_id,meli_user,meeting_day,meeting_time,meeting_frequency,time_bank_seconds'),
+    supabaseRest('/clients?select=id,name,company,email,owner_id,status_id,consultor_id,complexity_id,ad_status_id,meli_user,meli_password,vs_category,meeting_day,meeting_time,meeting_frequency,time_bank_seconds'),
     supabaseRest('/boards?select=id,name,color,position&order=position.asc'),
     supabaseRest('/board_columns?select=id,board_id,name,position&order=position.asc'),
     supabaseRest('/cards?select=id,board_id,column_id,client_id,title,description,due_date,created_by,assigned_to,timer_status,timer_elapsed_seconds,timer_started_at,recurring_task_id,occurrence_date'),
@@ -416,6 +416,8 @@ async function getSupabaseState() {
       complexity: complexityMap.get(client.complexity_id)?.name || '',
       adStatus: adStatusMap.get(client.ad_status_id)?.name || '',
       meliUser: client.meli_user || '',
+      meliPassword: client.meli_password || '',
+      vsCategory: client.vs_category || '',
       meetingDay: client.meeting_day ?? null,
       meetingTime: client.meeting_time || '',
       meetingFrequency: client.meeting_frequency ?? null,
@@ -668,7 +670,7 @@ async function getSupabaseSettings() {
 }
 
 async function getSupabaseClient(clientId) {
-  const [client] = await supabaseRest(`/clients?select=id,name,company,email,owner_id,meeting_day,meeting_time,meeting_frequency,time_bank_seconds,complexity_id,ad_status_id,meli_user,status:client_statuses(name),consultor:client_consultors(name),complexity:complexities(name),ad_status:ad_statuses(name)&id=eq.${encodeURIComponent(clientId)}&limit=1`);
+  const [client] = await supabaseRest(`/clients?select=id,name,company,email,owner_id,meeting_day,meeting_time,meeting_frequency,time_bank_seconds,complexity_id,ad_status_id,meli_user,meli_password,vs_category,status:client_statuses(name),consultor:client_consultors(name),complexity:complexities(name),ad_status:ad_statuses(name)&id=eq.${encodeURIComponent(clientId)}&limit=1`);
   if (!client) return null;
   return {
     id: client.id,
@@ -681,6 +683,8 @@ async function getSupabaseClient(clientId) {
     complexity: client.complexity?.name || '',
     adStatus: client.ad_status?.name || '',
     meliUser: client.meli_user || '',
+    meliPassword: client.meli_password || '',
+    vsCategory: client.vs_category || '',
     meetingDay: client.meeting_day ?? null,
     meetingTime: client.meeting_time || '',
     meetingFrequency: client.meeting_frequency ?? null,
@@ -1391,6 +1395,8 @@ async function handleApi(req, res, url) {
       complexity: String(body.complexity || '').trim(),
       adStatus: String(body.adStatus || '').trim(),
       meliUser: String(body.meliUser || '').trim(),
+      meliPassword: String(body.meliPassword || '').trim(),
+      vsCategory: String(body.vsCategory || '').trim(),
       meetingDay: parseMeetingDay(body.meetingDay),
       meetingTime: parseMeetingTime(body.meetingTime),
       meetingFrequency: parseMeetingFrequency(body.meetingFrequency)
@@ -1416,6 +1422,8 @@ async function handleApi(req, res, url) {
         complexity_id: complexityId,
         ad_status_id: adStatusId,
         meli_user: client.meliUser || null,
+        meli_password: client.meliPassword || null,
+        vs_category: client.vsCategory || null,
         meeting_day: client.meetingDay,
         meeting_time: client.meetingTime,
         meeting_frequency: client.meetingFrequency
@@ -1593,6 +1601,8 @@ async function handleApi(req, res, url) {
         complexity: body.complexity === undefined ? client.complexity || '' : String(body.complexity || '').trim(),
         adStatus: body.adStatus === undefined ? client.adStatus || '' : String(body.adStatus || '').trim(),
         meliUser: body.meliUser === undefined ? client.meliUser || '' : String(body.meliUser || '').trim(),
+        meliPassword: body.meliPassword === undefined ? client.meliPassword || '' : String(body.meliPassword || '').trim(),
+        vsCategory: body.vsCategory === undefined ? client.vsCategory || '' : String(body.vsCategory || '').trim(),
         meetingDay: body.meetingDay === undefined ? client.meetingDay : parseMeetingDay(body.meetingDay),
         meetingTime: body.meetingTime === undefined ? client.meetingTime : parseMeetingTime(body.meetingTime),
         meetingFrequency: body.meetingFrequency === undefined ? client.meetingFrequency : parseMeetingFrequency(body.meetingFrequency)
@@ -1617,6 +1627,8 @@ async function handleApi(req, res, url) {
           complexity_id: complexityId,
           ad_status_id: adStatusId,
           meli_user: payload.meliUser || null,
+          meli_password: payload.meliPassword || null,
+          vs_category: payload.vsCategory || null,
           meeting_day: payload.meetingDay,
           meeting_time: payload.meetingTime,
           meeting_frequency: payload.meetingFrequency

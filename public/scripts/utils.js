@@ -38,6 +38,12 @@ export function formatTimerDuration(durationSeconds) {
   return hours ? `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}` : `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
+export function formatBankDuration(durationSeconds) {
+  const minutes = Math.floor(Math.max(0, Number(durationSeconds) || 0) / 60);
+  if (minutes < 60) return `${minutes} min`;
+  return `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
+}
+
 export function setButtonLoading(button, loading, originalText = null) {
   if (loading) {
     button.dataset.originalText = button.textContent;
