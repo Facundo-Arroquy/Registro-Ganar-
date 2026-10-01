@@ -2719,6 +2719,12 @@ header {
   color: var(--text-muted);
 }
 
+.client-meeting-editor {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
 .client-info-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -2741,6 +2747,21 @@ header {
   margin-top: 6px;
   overflow-wrap: anywhere;
   font-size: 0.85rem;
+}
+
+.client-credential {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.client-credential button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent-blue);
+  cursor: pointer;
+  font-size: 0.78rem;
 }
 
 .client-profile-links {
@@ -3266,6 +3287,15 @@ header {
 
   .client-profile-header {
     align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .client-profile-header #edit-client {
+    width: 100%;
+  }
+
+  .client-meeting-editor {
+    grid-template-columns: 1fr;
   }
 
   .client-profile-title {
