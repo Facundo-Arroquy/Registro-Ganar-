@@ -763,6 +763,10 @@ header {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--status-color) 24%, transparent);
 }
 
+.status-count-all {
+  --status-color: var(--accent-blue);
+}
+
 .status-count-chip.custom-status {
   border-color: color-mix(in srgb, var(--status-color) 38%, transparent);
   background: color-mix(in srgb, var(--status-color) 12%, transparent);

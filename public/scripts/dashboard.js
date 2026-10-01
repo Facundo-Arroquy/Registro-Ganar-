@@ -46,13 +46,15 @@ function renderDashboard() {
   });
   const countsRow = document.querySelector('#status-counts-row');
   if (countsRow) {
-    countsRow.innerHTML = Object.entries(statusCounts)
+    const statusButtons = Object.entries(statusCounts)
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([status, count]) => `<button type="button" class="status-count-chip custom-status ${status === selectedStatus ? 'active' : ''}" style="--status-color: ${escapeHtml(getStatusColor(status))}" data-status-count-filter="${escapeHtml(status)}" aria-pressed="${status === selectedStatus}"><span class="status-count-label">${escapeHtml(status)}</span><span class="status-count-value">${count}</span></button>`)
       .join('');
+    countsRow.innerHTML = `<button type="button" class="status-count-chip status-count-all ${selectedStatus ? '' : 'active'}" data-status-count-filter="" aria-pressed="${!selectedStatus}"><span class="status-count-label">Todos</span><span class="status-count-value">${state.clients.length}</span></button>${statusButtons}`;
     countsRow.querySelectorAll('[data-status-count-filter]').forEach((button) => {
       button.addEventListener('click', () => {
-        selectedStatus = selectedStatus === button.dataset.statusCountFilter ? '' : button.dataset.statusCountFilter;
+        const nextStatus = button.dataset.statusCountFilter;
+        selectedStatus = selectedStatus === nextStatus ? '' : nextStatus;
         renderDashboard();
       });
     });
