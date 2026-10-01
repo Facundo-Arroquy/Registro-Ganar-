@@ -7,7 +7,7 @@ const currentUser = requireSession();
 let state;
 let sortColumn = null;
 let sortDirection = 'asc';
-let selectedStatus = 'Plan Activo';
+let selectedStatus = '';
 
 async function boot() {
   state = await loadAppState();
@@ -28,7 +28,6 @@ function renderPage() {
   });
   document.querySelector('[data-open-client]').onclick = () => openClientModal();
   document.querySelector('[data-add-general-link]').onclick = () => openGeneralLinkModal();
-  renderClientStatusFilter();
   renderDashboard();
   renderGeneralLinks();
 }
@@ -49,8 +48,14 @@ function renderDashboard() {
   if (countsRow) {
     countsRow.innerHTML = Object.entries(statusCounts)
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([status, count]) => `<div class="status-count-chip custom-status" style="--status-color: ${escapeHtml(getStatusColor(status))}"><span class="status-count-label">${escapeHtml(status)}</span><span class="status-count-value">${count}</span></div>`)
+      .map(([status, count]) => `<button type="button" class="status-count-chip custom-status ${status === selectedStatus ? 'active' : ''}" style="--status-color: ${escapeHtml(getStatusColor(status))}" data-status-count-filter="${escapeHtml(status)}" aria-pressed="${status === selectedStatus}"><span class="status-count-label">${escapeHtml(status)}</span><span class="status-count-value">${count}</span></button>`)
       .join('');
+    countsRow.querySelectorAll('[data-status-count-filter]').forEach((button) => {
+      button.addEventListener('click', () => {
+        selectedStatus = selectedStatus === button.dataset.statusCountFilter ? '' : button.dataset.statusCountFilter;
+        renderDashboard();
+      });
+    });
   }
 
   const enriched = state.clients
@@ -129,21 +134,6 @@ function renderDashboard() {
       openClientModal(getClientById(button.dataset.editClientButton));
     });
   });
-}
-
-function renderClientStatusFilter() {
-  const select = document.querySelector('[data-client-status-filter]');
-  const statuses = getClientStatuses().map(getStatusName).filter(Boolean);
-  if (selectedStatus && !statuses.includes(selectedStatus)) selectedStatus = '';
-  select.innerHTML = `
-    <option value="">Todos</option>
-    ${statuses.map((status) => `<option value="${escapeHtml(status)}" ${status === selectedStatus ? 'selected' : ''}>${escapeHtml(status)}</option>`).join('')}
-  `;
-  select.onchange = () => {
-    selectedStatus = select.value;
-    renderDashboard();
-  };
-  select.onclick = (event) => event.stopPropagation();
 }
 
 function getSortValue(row, column) {

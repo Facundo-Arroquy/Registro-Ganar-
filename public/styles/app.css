@@ -748,6 +748,19 @@ header {
   border-radius: 20px;
   padding: 4px 12px;
   font-size: 0.8rem;
+  color: inherit;
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+}
+
+.status-count-chip:hover {
+  transform: translateY(-1px);
+}
+
+.status-count-chip.active {
+  border-color: var(--status-color);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--status-color) 24%, transparent);
 }
 
 .status-count-chip.custom-status {
@@ -825,22 +838,6 @@ header {
   display: flex;
   align-items: flex-end;
   gap: 10px;
-}
-
-.client-status-filter {
-  display: flex;
-  align-items: flex-start;
-  flex-direction: column;
-  gap: 5px;
-  color: var(--text-muted);
-  font-size: 0.8rem;
-}
-
-.client-status-filter .form-control {
-  width: 130px;
-  min-width: 130px;
-  padding: 5px 8px;
-  font-size: 0.78rem;
 }
 
 .empty-table-message {
