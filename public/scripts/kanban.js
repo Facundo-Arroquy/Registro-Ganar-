@@ -9,6 +9,7 @@ let draggedCardId = null;
 let draggedColumnId = null;
 let boardWriteQueue = Promise.resolve();
 let timerInterval = null;
+let selectedClientId = '';
 
 async function boot() {
   state = await loadAppState();
@@ -29,6 +30,7 @@ function renderPage() {
     activePage: 'kanban',
     onSelectBoard: (boardId) => {
       setActiveBoard(state, boardId);
+      selectedClientId = '';
       renderPage();
     },
     onRefresh: refresh
@@ -43,13 +45,17 @@ function renderActiveBoard() {
   if (!board) return;
   document.querySelector('#current-board-title').textContent = board.name;
   document.querySelector('#current-board-color').style.backgroundColor = board.color;
+  renderClientFilter(board);
   document.querySelector('#kanban-board').innerHTML = board.columns.map((column) => renderColumn(board, column)).join('');
   bindKanbanEvents();
   startTimerRefresh();
 }
 
 function renderColumn(board, column) {
-  const cards = board.cards.filter((card) => card.columnId === column.id);
+  const cards = board.cards.filter((card) => (
+    card.columnId === column.id
+    && (!selectedClientId || card.clientId === selectedClientId)
+  ));
   return `
     <section class="column" draggable="true" data-column-id="${escapeHtml(column.id)}">
       <div class="column-header">
@@ -66,6 +72,27 @@ function renderColumn(board, column) {
       <button class="add-card-btn" type="button" data-add-card="${escapeHtml(column.id)}">+ Anadir tarjeta</button>
     </section>
   `;
+}
+
+function renderClientFilter(board) {
+  const select = document.querySelector('#board-client-filter');
+  const clientIdsWithCards = new Set(board.cards.map((card) => card.clientId).filter(Boolean));
+  const clients = state.clients
+    .filter((client) => clientIdsWithCards.has(client.id))
+    .sort((a, b) => (a.company || a.name).localeCompare(b.company || b.name, 'es'));
+
+  if (selectedClientId && !clientIdsWithCards.has(selectedClientId)) selectedClientId = '';
+  select.innerHTML = `
+    <option value="">Todos los clientes (${clients.length})</option>
+    ${clients.map((client) => {
+      const cardCount = board.cards.filter((card) => card.clientId === client.id).length;
+      return `<option value="${escapeHtml(client.id)}" ${client.id === selectedClientId ? 'selected' : ''}>${escapeHtml(client.company || client.name)} (${cardCount})</option>`;
+    }).join('')}
+  `;
+  select.onchange = () => {
+    selectedClientId = select.value;
+    renderActiveBoard();
+  };
 }
 
 function renderCard(card) {

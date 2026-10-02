@@ -1,7 +1,7 @@
 import { api, requireSession } from './api.js';
 import { loadAppState, refreshAppState } from './app-state.js';
 import { closeModal, openModal, renderSidebar } from './layout.js';
-import { escapeHtml, getInitials } from './utils.js';
+import { escapeHtml, formatBankDuration, getInitials, setButtonLoading } from './utils.js';
 
 const currentUser = requireSession();
 const clientId = new URLSearchParams(window.location.search).get('id');
@@ -46,6 +46,7 @@ function renderPage() {
         <div class="client-profile-title"><h1>${escapeHtml(client.company || client.name)}</h1>${renderConfiguredBadge('clientStatuses', client.status || 'Sin estado')}</div>
         <p>${escapeHtml(client.name || 'Sin contacto principal')}</p>
       </div>
+      <button class="btn btn-secondary" type="button" id="edit-client">Editar cliente</button>
     </header>
     <section class="client-info-grid">
       ${infoItem('Contacto', client.name || '-')}
@@ -54,8 +55,11 @@ function renderPage() {
       ${infoItem('Consultor', client.consultor || 'Sin asignar')}
       ${client.complexity ? infoHtmlItem('Complejidad', renderConfiguredBadge('complexities', client.complexity)) : infoItem('Complejidad', 'Sin definir')}
       ${client.adStatus ? infoHtmlItem('Publicidad', renderConfiguredBadge('adStatuses', client.adStatus)) : infoItem('Publicidad', 'Sin definir')}
+      ${infoItem('Usuario de Mercado Libre', client.meliUser || 'Sin definir')}
+      ${credentialItem('Contraseña de Mercado Libre', client.meliPassword)}
+      ${infoItem('Categoría de VS', client.vsCategory || 'Sin definir')}
       ${infoItem('Reunión habitual', formatRecurringMeeting(client))}
-      ${infoItem('Banco de tiempo', formatDuration(client.timeBankSeconds))}
+      ${infoItem('Banco de tiempo', formatBankDuration(client.timeBankSeconds))}
     </section>
     ${renderLinks(client.links || [])}
     <section class="client-detail-section">
@@ -71,7 +75,78 @@ function renderPage() {
   renderMetricYearTabs();
   renderMetrics();
   setupCommentActions();
+  setupCredentialToggle();
+  document.querySelector('#edit-client')?.addEventListener('click', openClientEditor);
   document.querySelector('#edit-current-month')?.addEventListener('click', openMonthEditor);
+}
+
+function settingOptions(collection, selected, emptyLabel = '') {
+  const options = (state.settings?.[collection] || []).map((item) => typeof item === 'string' ? item : item?.name || '').filter(Boolean);
+  return `${emptyLabel ? `<option value="">${escapeHtml(emptyLabel)}</option>` : ''}${options.map((name) => `<option value="${escapeHtml(name)}" ${name === selected ? 'selected' : ''}>${escapeHtml(name)}</option>`).join('')}`;
+}
+
+function ownerOptions(selected) {
+  return `<option value="">Sin responsable</option>${state.users.map((user) => `<option value="${escapeHtml(user.id)}" ${user.id === selected ? 'selected' : ''}>${escapeHtml(user.name)}</option>`).join('')}`;
+}
+
+function openClientEditor() {
+  const client = detail.client;
+  const overlay = openModal(`
+    <div class="modal-overlay">
+      <form class="modal">
+        <div class="modal-header">Editar cliente</div>
+        <div class="form-group"><label for="detail-client-name">Nombre del contacto</label><input class="form-control" id="detail-client-name" value="${escapeHtml(client.name || '')}" required></div>
+        <div class="form-group"><label for="detail-client-company">Empresa</label><input class="form-control" id="detail-client-company" value="${escapeHtml(client.company || '')}" required></div>
+        <div class="form-group"><label for="detail-client-email">Correos electrónicos <span class="optional-label">(uno por línea)</span></label><textarea class="form-control" id="detail-client-email" rows="2">${escapeHtml(client.email || '')}</textarea></div>
+        <div class="form-group"><label for="detail-client-owner">Responsable</label><select class="form-control" id="detail-client-owner">${ownerOptions(client.ownerId || '')}</select></div>
+        <div class="form-group"><label for="detail-client-consultor">Consultor</label><select class="form-control" id="detail-client-consultor">${settingOptions('clientConsultors', client.consultor, 'Sin consultor')}</select></div>
+        <div class="form-group"><label for="detail-client-status">Estado</label><select class="form-control" id="detail-client-status">${settingOptions('clientStatuses', client.status)}</select></div>
+        <div class="form-group"><label for="detail-client-complexity">Complejidad</label><select class="form-control" id="detail-client-complexity">${settingOptions('complexities', client.complexity, 'Sin definir')}</select></div>
+        <div class="form-group"><label for="detail-client-ad-status">Publicidad</label><select class="form-control" id="detail-client-ad-status">${settingOptions('adStatuses', client.adStatus, 'Sin definir')}</select></div>
+        <div class="form-group"><label for="detail-client-meli-user">Usuario de Mercado Libre</label><input class="form-control" id="detail-client-meli-user" autocomplete="off" value="${escapeHtml(client.meliUser || '')}"></div>
+        <div class="form-group"><label for="detail-client-meli-password">Contraseña de Mercado Libre</label><input class="form-control" id="detail-client-meli-password" type="password" autocomplete="off" value="${escapeHtml(client.meliPassword || '')}"></div>
+        <div class="form-group"><label for="detail-client-vs-category">Categoría de VS</label><input class="form-control" id="detail-client-vs-category" value="${escapeHtml(client.vsCategory || '')}"></div>
+        <div class="form-group"><label>Reunión habitual</label><div class="client-meeting-editor"><select class="form-control" id="detail-client-meeting-day"><option value="">Sin reunión</option>${[['1','Lunes'],['2','Martes'],['3','Miércoles'],['4','Jueves'],['5','Viernes'],['6','Sábado'],['0','Domingo']].map(([value, label]) => `<option value="${value}" ${client.meetingDay !== null && String(client.meetingDay) === value ? 'selected' : ''}>${label}</option>`).join('')}</select><input class="form-control" id="detail-client-meeting-time" type="time" value="${escapeHtml(String(client.meetingTime || '').slice(0, 5))}"><select class="form-control" id="detail-client-meeting-frequency"><option value="">Frecuencia</option><option value="7" ${client.meetingFrequency === 7 ? 'selected' : ''}>Cada 7 días</option><option value="15" ${client.meetingFrequency === 15 ? 'selected' : ''}>Cada 15 días</option></select></div></div>
+        <div class="modal-actions"><button class="btn btn-secondary" type="button" data-close-modal>Cancelar</button><button class="btn" type="submit">Guardar cambios</button></div>
+      </form>
+    </div>`);
+
+  let submitting = false;
+  overlay.querySelector('form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (submitting) return;
+    const payload = {
+      name: overlay.querySelector('#detail-client-name').value.trim(),
+      company: overlay.querySelector('#detail-client-company').value.trim(),
+      email: overlay.querySelector('#detail-client-email').value.trim(),
+      ownerId: overlay.querySelector('#detail-client-owner').value,
+      consultor: overlay.querySelector('#detail-client-consultor').value,
+      status: overlay.querySelector('#detail-client-status').value,
+      complexity: overlay.querySelector('#detail-client-complexity').value,
+      adStatus: overlay.querySelector('#detail-client-ad-status').value,
+      meliUser: overlay.querySelector('#detail-client-meli-user').value.trim(),
+      meliPassword: overlay.querySelector('#detail-client-meli-password').value.trim(),
+      vsCategory: overlay.querySelector('#detail-client-vs-category').value.trim(),
+      meetingDay: overlay.querySelector('#detail-client-meeting-day').value === '' ? null : Number(overlay.querySelector('#detail-client-meeting-day').value),
+      meetingTime: overlay.querySelector('#detail-client-meeting-time').value || null,
+      meetingFrequency: overlay.querySelector('#detail-client-meeting-frequency').value ? Number(overlay.querySelector('#detail-client-meeting-frequency').value) : null,
+      userId: currentUser.id,
+      userName: currentUser.name
+    };
+    if (!payload.name || !payload.company) return;
+    const submit = overlay.querySelector('button[type="submit"]');
+    submitting = true;
+    setButtonLoading(submit, true, 'Guardando...');
+    try {
+      await api(`/api/clients/${encodeURIComponent(clientId)}`, { method: 'PATCH', body: JSON.stringify(payload) });
+      closeModal();
+      await refresh();
+    } catch (error) {
+      submitting = false;
+      setButtonLoading(submit, false);
+      alert(error.message);
+    }
+  });
 }
 
 function infoItem(label, value) {
@@ -80,6 +155,21 @@ function infoItem(label, value) {
 
 function infoHtmlItem(label, value) {
   return `<div class="client-info-item"><span>${escapeHtml(label)}</span><strong>${value}</strong></div>`;
+}
+
+function credentialItem(label, value) {
+  if (!value) return infoItem(label, 'Sin definir');
+  return `<div class="client-info-item"><span>${escapeHtml(label)}</span><div class="client-credential"><strong data-credential-value data-hidden-value="${escapeHtml(value)}">••••••••</strong><button type="button" data-toggle-credential aria-label="Mostrar ${escapeHtml(label)}" aria-pressed="false">Mostrar</button></div></div>`;
+}
+
+function setupCredentialToggle() {
+  document.querySelectorAll('[data-toggle-credential]').forEach((button) => button.addEventListener('click', () => {
+    const value = button.parentElement.querySelector('[data-credential-value]');
+    const showing = button.getAttribute('aria-pressed') === 'true';
+    value.textContent = showing ? '••••••••' : value.dataset.hiddenValue;
+    button.textContent = showing ? 'Mostrar' : 'Ocultar';
+    button.setAttribute('aria-pressed', String(!showing));
+  }));
 }
 
 function getSettingColor(collection, name) {
@@ -291,7 +381,6 @@ function formatPlainMetric(value, money) {
 function compactNumber(value) { return Number(value).toLocaleString('es-AR', { notation: 'compact', maximumFractionDigits: 1 }); }
 function formatDate(value) { return new Date(value).toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' }); }
 function formatDateTime(value) { return new Date(value).toLocaleString('es-AR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }); }
-function formatDuration(seconds) { const minutes = Math.floor(Number(seconds || 0) / 60); return minutes >= 60 ? `${Math.floor(minutes / 60)} h ${minutes % 60} min` : `${minutes} min`; }
 function formatRecurringMeeting(client) { const days = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado']; if (client.meetingDay === null || client.meetingDay === undefined) return 'Sin definir'; return `${days[client.meetingDay]} ${String(client.meetingTime || '').slice(0, 5)}${client.meetingFrequency ? ` · cada ${client.meetingFrequency} días` : ''}`; }
 
 boot().catch((error) => {

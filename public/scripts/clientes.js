@@ -1,7 +1,7 @@
 import { requireSession } from './api.js';
-import { loadAppState, refreshAppState } from './app-state.js';
+import { refreshAppState } from './app-state.js';
 import { renderSidebar } from './layout.js';
-import { escapeHtml, getInitials } from './utils.js';
+import { escapeHtml, formatBankDuration, getInitials } from './utils.js';
 
 const currentUser = requireSession();
 let state;
@@ -9,7 +9,7 @@ let searchTerm = '';
 const selectedStatuses = new Set();
 
 async function boot() {
-  state = await loadAppState();
+  state = await refreshAppState();
   renderSidebar({ state, currentUser, activePage: 'clientes', onRefresh: refresh });
   document.querySelector('#clients-search').addEventListener('input', (event) => {
     searchTerm = event.target.value.trim().toLocaleLowerCase('es');
@@ -64,6 +64,7 @@ function renderClients() {
             <span>${escapeHtml(client.consultor || 'Sin consultor')}</span>
             <span>${escapeHtml(owner?.name || 'Sin responsable')}</span>
             <span>${escapeHtml(client.email || 'Sin correo')}</span>
+            <span>Banco: ${escapeHtml(formatBankDuration(client.timeBankSeconds))}</span>
           </div>
         </div>
         <span class="client-card-arrow" aria-hidden="true">&rarr;</span>

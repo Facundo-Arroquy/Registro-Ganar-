@@ -1,13 +1,13 @@
 import { api, requireSession } from './api.js';
 import { loadAppState, refreshAppState } from './app-state.js';
 import { closeModal, openModal, renderSidebar } from './layout.js';
-import { escapeHtml, getDueDateStatus, setButtonLoading } from './utils.js';
+import { escapeHtml, formatBankDuration, getDueDateStatus, setButtonLoading } from './utils.js';
 
 const currentUser = requireSession();
 let state;
 let sortColumn = null;
 let sortDirection = 'asc';
-let selectedStatus = 'Plan Activo';
+let selectedStatus = '';
 
 async function boot() {
   state = await loadAppState();
@@ -28,7 +28,6 @@ function renderPage() {
   });
   document.querySelector('[data-open-client]').onclick = () => openClientModal();
   document.querySelector('[data-add-general-link]').onclick = () => openGeneralLinkModal();
-  renderClientStatusFilter();
   renderDashboard();
   renderGeneralLinks();
 }
@@ -47,10 +46,18 @@ function renderDashboard() {
   });
   const countsRow = document.querySelector('#status-counts-row');
   if (countsRow) {
-    countsRow.innerHTML = Object.entries(statusCounts)
+    const statusButtons = Object.entries(statusCounts)
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([status, count]) => `<div class="status-count-chip custom-status" style="--status-color: ${escapeHtml(getStatusColor(status))}"><span class="status-count-label">${escapeHtml(status)}</span><span class="status-count-value">${count}</span></div>`)
+      .map(([status, count]) => `<button type="button" class="status-count-chip custom-status ${status === selectedStatus ? 'active' : ''}" style="--status-color: ${escapeHtml(getStatusColor(status))}" data-status-count-filter="${escapeHtml(status)}" aria-pressed="${status === selectedStatus}"><span class="status-count-label">${escapeHtml(status)}</span><span class="status-count-value">${count}</span></button>`)
       .join('');
+    countsRow.innerHTML = `<button type="button" class="status-count-chip status-count-all ${selectedStatus ? '' : 'active'}" data-status-count-filter="" aria-pressed="${!selectedStatus}"><span class="status-count-label">Todos</span><span class="status-count-value">${state.clients.length}</span></button>${statusButtons}`;
+    countsRow.querySelectorAll('[data-status-count-filter]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const nextStatus = button.dataset.statusCountFilter;
+        selectedStatus = selectedStatus === nextStatus ? '' : nextStatus;
+        renderDashboard();
+      });
+    });
   }
 
   const enriched = state.clients
@@ -92,7 +99,7 @@ function renderDashboard() {
       <td>${formatMeeting(client)}</td>
       <td><span class="card-count">${clientCards.length} tareas</span></td>
       <td><span class="card-count">${timedCards.length} tags</span></td>
-      <td>${timeBankSeconds ? `<span class="time-badge">${escapeHtml(formatDuration(timeBankSeconds))}</span>` : '<span style="color: var(--text-muted);">0m</span>'}</td>
+      <td>${timeBankSeconds ? `<span class="time-badge">${escapeHtml(formatBankDuration(timeBankSeconds))}</span>` : '<span style="color: var(--text-muted);">0 min</span>'}</td>
       <td><button class="btn btn-secondary btn-sm" type="button" data-edit-client-button="${escapeHtml(client.id)}" data-stop-row-click>Editar</button></td>
     </tr>
   `).join('') : '<tr><td colspan="14" class="empty-table-message">No hay clientes con este estado.</td></tr>';
@@ -131,21 +138,6 @@ function renderDashboard() {
   });
 }
 
-function renderClientStatusFilter() {
-  const select = document.querySelector('[data-client-status-filter]');
-  const statuses = getClientStatuses().map(getStatusName).filter(Boolean);
-  if (selectedStatus && !statuses.includes(selectedStatus)) selectedStatus = '';
-  select.innerHTML = `
-    <option value="">Todos</option>
-    ${statuses.map((status) => `<option value="${escapeHtml(status)}" ${status === selectedStatus ? 'selected' : ''}>${escapeHtml(status)}</option>`).join('')}
-  `;
-  select.onchange = () => {
-    selectedStatus = select.value;
-    renderDashboard();
-  };
-  select.onclick = (event) => event.stopPropagation();
-}
-
 function getSortValue(row, column) {
   switch (column) {
     case 'name': return row.client.name.toLowerCase();
@@ -175,17 +167,6 @@ function getClientCards(clientId) {
 
 function getTimedClientCards(clientId) {
   return state.boards.flatMap((board) => board.cards.filter((card) => card.clientId === clientId && card.timerStatus !== 'idle'));
-}
-
-function formatDuration(durationSeconds) {
-  const minutes = Math.floor(durationSeconds / 60);
-  const hours = Math.floor(durationSeconds / (60 * 60));
-  const days = Math.floor(durationSeconds / (60 * 60 * 24));
-
-  if (minutes < 60) return `${minutes}m`;
-  if (hours < 24) return `${hours}h ${minutes % 60}m`;
-  const remainingHours = hours % 24;
-  return remainingHours ? `${days}d ${remainingHours}h` : `${days}d`;
 }
 
 function openClientModal(client = null) {
@@ -226,8 +207,16 @@ function openClientModal(client = null) {
           </select>
         </div>
         <div class="form-group">
-          <label>Usuario Meli</label>
-          <input type="text" id="client-meli-user-input" class="form-control" placeholder="Ej. email@gmail.com | clave" value="${escapeHtml(client?.meliUser || '')}">
+          <label>Usuario de Mercado Libre</label>
+          <input type="text" id="client-meli-user-input" class="form-control" autocomplete="off" placeholder="Ej. email@gmail.com" value="${escapeHtml(client?.meliUser || '')}">
+        </div>
+        <div class="form-group">
+          <label>Contraseña de Mercado Libre</label>
+          <input type="password" id="client-meli-password-input" class="form-control" autocomplete="off" placeholder="Contraseña de acceso" value="${escapeHtml(client?.meliPassword || '')}">
+        </div>
+        <div class="form-group">
+          <label>Categoría de VS</label>
+          <input type="text" id="client-vs-category-input" class="form-control" placeholder="Ej. Categoría A" value="${escapeHtml(client?.vsCategory || '')}">
         </div>
         <div class="form-group">
           <label>Dia de reunion</label>
@@ -250,7 +239,7 @@ function openClientModal(client = null) {
         <div class="form-group time-bank-panel">
           <label>Banco de tiempo acumulado</label>
           <div class="time-bank-reset-row">
-            <span class="time-badge">${escapeHtml(formatDuration(Number(client.timeBankSeconds || 0)))}</span>
+            <span class="time-badge">${escapeHtml(formatBankDuration(client.timeBankSeconds))}</span>
             <button class="btn btn-secondary btn-sm" type="button" data-reset-time-bank>Reiniciar banco</button>
           </div>
         </div>
@@ -350,6 +339,8 @@ function openClientModal(client = null) {
       complexity: overlay.querySelector('#client-complexity-input').value,
       adStatus: overlay.querySelector('#client-ad-status-input').value,
       meliUser: overlay.querySelector('#client-meli-user-input').value.trim(),
+      meliPassword: overlay.querySelector('#client-meli-password-input').value.trim(),
+      vsCategory: overlay.querySelector('#client-vs-category-input').value.trim(),
       meetingDay: meetingDayVal !== '' ? Number(meetingDayVal) : null,
       meetingTime: overlay.querySelector('#client-meeting-time').value || null,
       meetingFrequency: overlay.querySelector('#client-meeting-freq').value ? Number(overlay.querySelector('#client-meeting-freq').value) : null

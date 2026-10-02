@@ -424,6 +424,23 @@ header {
   gap: 12px;
 }
 
+.board-header-actions,
+.board-client-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.board-client-filter span {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.board-client-filter .form-control {
+  min-width: 220px;
+  padding: 7px 10px;
+}
+
 .kanban-board {
   flex: 1;
   padding: 24px;
@@ -731,6 +748,23 @@ header {
   border-radius: 20px;
   padding: 4px 12px;
   font-size: 0.8rem;
+  color: inherit;
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+}
+
+.status-count-chip:hover {
+  transform: translateY(-1px);
+}
+
+.status-count-chip.active {
+  border-color: var(--status-color);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--status-color) 24%, transparent);
+}
+
+.status-count-all {
+  --status-color: var(--accent-blue);
 }
 
 .status-count-chip.custom-status {
@@ -808,22 +842,6 @@ header {
   display: flex;
   align-items: flex-end;
   gap: 10px;
-}
-
-.client-status-filter {
-  display: flex;
-  align-items: flex-start;
-  flex-direction: column;
-  gap: 5px;
-  color: var(--text-muted);
-  font-size: 0.8rem;
-}
-
-.client-status-filter .form-control {
-  width: 130px;
-  min-width: 130px;
-  padding: 5px 8px;
-  font-size: 0.78rem;
 }
 
 .empty-table-message {
@@ -1586,6 +1604,22 @@ header {
 
 /* ── Tablet: ≤ 900px ── */
 @media (max-width: 900px) {
+  [data-page="kanban"] header {
+    height: auto;
+    min-height: 60px;
+    padding-block: 10px;
+    gap: 10px;
+  }
+
+  .board-header-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .board-client-filter .form-control {
+    min-width: 180px;
+  }
+
   aside {
     width: 240px;
     padding: 16px;
@@ -2686,6 +2720,12 @@ header {
   color: var(--text-muted);
 }
 
+.client-meeting-editor {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
 .client-info-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -2708,6 +2748,21 @@ header {
   margin-top: 6px;
   overflow-wrap: anywhere;
   font-size: 0.85rem;
+}
+
+.client-credential {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.client-credential button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent-blue);
+  cursor: pointer;
+  font-size: 0.78rem;
 }
 
 .client-profile-links {
@@ -3233,6 +3288,15 @@ header {
 
   .client-profile-header {
     align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .client-profile-header #edit-client {
+    width: 100%;
+  }
+
+  .client-meeting-editor {
+    grid-template-columns: 1fr;
   }
 
   .client-profile-title {
