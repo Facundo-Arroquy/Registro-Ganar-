@@ -33,10 +33,12 @@ function renderPage() {
 }
 
 function renderDashboard() {
-  document.querySelector('#stat-total-clients').textContent = state.clients.length;
-  const cards = state.boards.flatMap((board) => board.cards);
-  document.querySelector('#stat-active-cards').textContent = cards.length;
-  document.querySelector('#stat-expired-cards').textContent = cards.filter((card) => getDueDateStatus(card.dueDate)?.status === 'expired').length;
+  const filteredClients = state.clients.filter((client) => !selectedStatus || (client.status || 'Activo') === selectedStatus);
+  const filteredClientIds = new Set(filteredClients.map((client) => client.id));
+  const cards = state.boards.flatMap((board) => board.cards).filter((card) => !selectedStatus || filteredClientIds.has(card.clientId));
+  document.querySelector('#stat-total-clients').textContent = filteredClients.length;
+  document.querySelector('#stat-active-cards').textContent = cards.filter((card) => !card.resolved).length;
+  document.querySelector('#stat-expired-cards').textContent = cards.filter((card) => getDueDateStatus(card.dueDate, card.resolved)?.status === 'expired').length;
 
   // Status counts
   const statusCounts = {};
@@ -92,7 +94,7 @@ function renderDashboard() {
       <td>${renderEmails(client.email)}</td>
       <td>${links.length ? links.map((link) => `<a href="${escapeHtml(link.url)}" target="_blank" rel="noopener" class="client-link" data-stop-row-click>${escapeHtml(link.label)}</a>`).join(' ') : '<span style="color: var(--text-muted);">-</span>'}</td>
       <td>${owner ? escapeHtml(owner.name) : '<span style="color: var(--text-muted);">Sin asignar</span>'}</td>
-      <td>${client.consultor ? consultorBadge(client.consultor) : '<span style="color: var(--text-muted);">-</span>'}</td>
+      <td>${client.consultors?.length ? client.consultors.map(consultorBadge).join(' ') : client.consultor ? consultorBadge(client.consultor) : '<span style="color: var(--text-muted);">-</span>'}</td>
       <td>${statusBadge(client.status || 'Activo')}</td>
       <td>${client.complexity ? complexityBadge(client.complexity) : '<span style="color: var(--text-muted);">-</span>'}</td>
       <td>${client.adStatus ? adStatusBadge(client.adStatus) : '<span style="color: var(--text-muted);">-</span>'}</td>
@@ -181,10 +183,8 @@ function openClientModal(client = null) {
         <div class="form-group"><label>Correos Electronicos <span style="color: var(--text-muted); font-weight: 400;">(uno por linea)</span></label><textarea id="client-email-input" class="form-control" rows="2" placeholder="cliente@techcorp.com&#10;otro@empresa.com">${escapeHtml(client?.email || '')}</textarea></div>
         <div class="form-group"><label>Personal a cargo</label><select id="client-owner-input" class="form-control">${userOptions(client?.ownerId || '')}</select></div>
         <div class="form-group">
-          <label>Consultor</label>
-          <select id="client-consultor-input" class="form-control">
-            ${consultorOptions(client?.consultor || '')}
-          </select>
+          <label>Consultores <span class="optional-label">(podés elegir más de uno)</span></label>
+          <div id="client-consultor-input" class="multi-tag-options">${consultorCheckboxes(client?.consultors || (client?.consultor ? [client.consultor] : []))}</div>
         </div>
         <div class="form-group">
           <label>Estado del cliente</label>
@@ -334,7 +334,7 @@ function openClientModal(client = null) {
       company: overlay.querySelector('#client-company-input').value.trim(),
       email: overlay.querySelector('#client-email-input').value.trim(),
       ownerId: overlay.querySelector('#client-owner-input').value,
-      consultor: overlay.querySelector('#client-consultor-input').value,
+      consultors: [...overlay.querySelectorAll('#client-consultor-input input:checked')].map((input) => input.value),
       status: overlay.querySelector('#client-status-input').value,
       complexity: overlay.querySelector('#client-complexity-input').value,
       adStatus: overlay.querySelector('#client-ad-status-input').value,
@@ -414,11 +414,12 @@ function getClientConsultors() {
   return state.settings?.clientConsultors?.length ? state.settings.clientConsultors : [];
 }
 
-function consultorOptions(selected) {
-  return `<option value="">Sin asignar</option>${getClientConsultors().map((item) => {
+function consultorCheckboxes(selected = []) {
+  const selectedNames = new Set(selected);
+  return getClientConsultors().map((item) => {
     const name = typeof item === 'string' ? item : item?.name || '';
-    return `<option value="${escapeHtml(name)}" ${name === selected ? 'selected' : ''}>${escapeHtml(name)}</option>`;
-  }).join('')}`;
+    return `<label><input type="checkbox" value="${escapeHtml(name)}" ${selectedNames.has(name) ? 'checked' : ''}><span>${consultorBadge(name)}</span></label>`;
+  }).join('');
 }
 
 function consultorBadge(name) {

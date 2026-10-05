@@ -291,26 +291,37 @@ function renderCoverSlide(editable) {
 // --- Slide: Client Update ---
 
 function renderClientUpdateSlide(clients) {
+  const areaCounts = new Map();
+  clients.forEach((client) => {
+    getClientAreas(client).forEach((area) => areaCounts.set(area, (areaCounts.get(area) || 0) + 1));
+  });
   return `
     <div class="weekly-slide">
       <h2 class="weekly-slide-title">Update clientes - Seguimiento</h2>
       <div class="weekly-content-box">
+        <div class="weekly-area-summary">
+          ${[...areaCounts.entries()].sort(([a], [b]) => a.localeCompare(b, 'es')).map(([area, count]) => `
+            <div class="weekly-area-count">
+              <span class="tag ${area.toLowerCase().includes('wim') ? 'tag-wim' : 'tag-klear'}">${escapeHtml(area)}</span>
+              <strong>${count}</strong>
+              <small>${count === 1 ? 'cliente' : 'clientes'}</small>
+            </div>
+          `).join('') || '<span class="weekly-area-empty">Sin áreas asignadas</span>'}
+        </div>
         <table>
           <thead>
             <tr>
               <th>Empresa</th>
-              <th>Consultor / Area</th>
+              <th>Área</th>
               <th>Estado</th>
             </tr>
           </thead>
           <tbody>
             ${clients.map(c => {
-              const isWim = (c.consultor || '').toLowerCase().includes('wim');
-              const tagClass = isWim ? 'tag-wim' : 'tag-klear';
               return `
                 <tr>
                   <td><strong>${escapeHtml(c.company || c.name)}</strong></td>
-                  <td><span class="tag ${tagClass}">${escapeHtml(c.consultor || '-')}</span></td>
+                  <td>${renderConsultorTags(c)}</td>
                   <td>${renderConfiguredBadge('clientStatuses', c.status || 'Activo')}</td>
                 </tr>
               `;
@@ -320,6 +331,19 @@ function renderClientUpdateSlide(clients) {
       </div>
     </div>
   `;
+}
+
+function renderConsultorTags(client) {
+  const names = getClientAreas(client);
+  if (!names.length) return '<span>-</span>';
+  return names.map((name) => `<span class="tag ${name.toLowerCase().includes('wim') ? 'tag-wim' : 'tag-klear'}">${escapeHtml(name)}</span>`).join(' ');
+}
+
+function getClientAreas(client) {
+  const names = client.consultors?.length
+    ? client.consultors
+    : String(client.consultor || '').split(',');
+  return [...new Set(names.map((name) => String(name).trim()).filter(Boolean))];
 }
 
 // --- Slide: Historical client metrics ---

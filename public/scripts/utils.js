@@ -17,7 +17,8 @@ export function getInitials(name) {
     .toUpperCase() || '--';
 }
 
-export function getDueDateStatus(dueDateStr) {
+export function getDueDateStatus(dueDateStr, resolved = false) {
+  if (resolved) return null;
   if (!dueDateStr) return null;
   const today = new Date();
   today.setHours(0, 0, 0, 0);
