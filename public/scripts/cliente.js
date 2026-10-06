@@ -52,7 +52,7 @@ function renderPage() {
       ${infoItem('Contacto', client.name || '-')}
       ${infoItem('Correo', client.email || '-')}
       ${infoItem('Responsable', owner?.name || 'Sin asignar')}
-      ${infoItem('Consultor', client.consultor || 'Sin asignar')}
+      ${infoHtmlItem('Consultores', renderConsultorBadges(client.consultors || (client.consultor ? [client.consultor] : [])))}
       ${client.complexity ? infoHtmlItem('Complejidad', renderConfiguredBadge('complexities', client.complexity)) : infoItem('Complejidad', 'Sin definir')}
       ${client.adStatus ? infoHtmlItem('Publicidad', renderConfiguredBadge('adStatuses', client.adStatus)) : infoItem('Publicidad', 'Sin definir')}
       ${infoItem('Usuario de Mercado Libre', client.meliUser || 'Sin definir')}
@@ -63,7 +63,7 @@ function renderPage() {
     </section>
     ${renderLinks(client.links || [])}
     <section class="client-detail-section">
-      <div class="client-section-heading"><div><p class="eyebrow">Resultados</p><h2>Métricas históricas</h2></div><div class="metrics-heading-actions"><div class="metrics-year-tabs" id="metrics-year-tabs"></div><button class="btn btn-sm" type="button" id="edit-current-month">Editar ${monthNames[(detail.currentPeriodSummary?.month || new Date().getMonth() + 1) - 1]}</button></div></div>
+      <div class="client-section-heading"><div><p class="eyebrow">Resultados</p><h2>Métricas históricas</h2></div><div class="metrics-heading-actions"><div class="metrics-year-tabs" id="metrics-year-tabs"></div><label class="metric-month-editor"><span>Mes</span><select class="form-control" id="edit-month-select">${monthNames.map((name, index) => `<option value="${index + 1}" ${index + 1 === (detail.currentPeriodSummary?.month || new Date().getMonth() + 1) ? 'selected' : ''}>${name}</option>`).join('')}</select></label><button class="btn btn-sm" type="button" id="edit-selected-month">Editar mes</button></div></div>
       <div id="metrics-content"></div>
     </section>
     <div class="client-detail-columns">
@@ -77,7 +77,7 @@ function renderPage() {
   setupCommentActions();
   setupCredentialToggle();
   document.querySelector('#edit-client')?.addEventListener('click', openClientEditor);
-  document.querySelector('#edit-current-month')?.addEventListener('click', openMonthEditor);
+  document.querySelector('#edit-selected-month')?.addEventListener('click', openMonthEditor);
 }
 
 function settingOptions(collection, selected, emptyLabel = '') {
@@ -99,7 +99,7 @@ function openClientEditor() {
         <div class="form-group"><label for="detail-client-company">Empresa</label><input class="form-control" id="detail-client-company" value="${escapeHtml(client.company || '')}" required></div>
         <div class="form-group"><label for="detail-client-email">Correos electrónicos <span class="optional-label">(uno por línea)</span></label><textarea class="form-control" id="detail-client-email" rows="2">${escapeHtml(client.email || '')}</textarea></div>
         <div class="form-group"><label for="detail-client-owner">Responsable</label><select class="form-control" id="detail-client-owner">${ownerOptions(client.ownerId || '')}</select></div>
-        <div class="form-group"><label for="detail-client-consultor">Consultor</label><select class="form-control" id="detail-client-consultor">${settingOptions('clientConsultors', client.consultor, 'Sin consultor')}</select></div>
+        <div class="form-group"><label>Consultores <span class="optional-label">(podés elegir más de uno)</span></label><div class="multi-tag-options" id="detail-client-consultors">${consultorCheckboxes(client.consultors || (client.consultor ? [client.consultor] : []))}</div></div>
         <div class="form-group"><label for="detail-client-status">Estado</label><select class="form-control" id="detail-client-status">${settingOptions('clientStatuses', client.status)}</select></div>
         <div class="form-group"><label for="detail-client-complexity">Complejidad</label><select class="form-control" id="detail-client-complexity">${settingOptions('complexities', client.complexity, 'Sin definir')}</select></div>
         <div class="form-group"><label for="detail-client-ad-status">Publicidad</label><select class="form-control" id="detail-client-ad-status">${settingOptions('adStatuses', client.adStatus, 'Sin definir')}</select></div>
@@ -120,7 +120,7 @@ function openClientEditor() {
       company: overlay.querySelector('#detail-client-company').value.trim(),
       email: overlay.querySelector('#detail-client-email').value.trim(),
       ownerId: overlay.querySelector('#detail-client-owner').value,
-      consultor: overlay.querySelector('#detail-client-consultor').value,
+      consultors: [...overlay.querySelectorAll('#detail-client-consultors input:checked')].map((input) => input.value),
       status: overlay.querySelector('#detail-client-status').value,
       complexity: overlay.querySelector('#detail-client-complexity').value,
       adStatus: overlay.querySelector('#detail-client-ad-status').value,
@@ -181,6 +181,19 @@ function renderConfiguredBadge(collection, name) {
   return `<span class="status-badge custom-status" style="--status-color: ${escapeHtml(getSettingColor(collection, name))}">${escapeHtml(name)}</span>`;
 }
 
+function renderConsultorBadges(names) {
+  if (!names.length) return '<span class="muted-value">Sin asignar</span>';
+  return `<span class="inline-tags">${names.map((name) => renderConfiguredBadge('clientConsultors', name)).join('')}</span>`;
+}
+
+function consultorCheckboxes(selected = []) {
+  const selectedNames = new Set(selected);
+  return (state.settings?.clientConsultors || []).map((item) => {
+    const name = typeof item === 'string' ? item : item?.name || '';
+    return `<label><input type="checkbox" value="${escapeHtml(name)}" ${selectedNames.has(name) ? 'checked' : ''}><span>${renderConfiguredBadge('clientConsultors', name)}</span></label>`;
+  }).join('');
+}
+
 function renderLinks(links) {
   if (!links.length) return '';
   return `<div class="client-profile-links">${links.map((link) => `<a href="${escapeHtml(link.url)}" target="_blank" rel="noopener">${escapeHtml(link.label)} &nearr;</a>`).join('')}</div>`;
@@ -223,9 +236,8 @@ function renderMetrics() {
 }
 
 async function openMonthEditor() {
-  const period = detail.currentPeriodSummary;
-  const year = period?.year || new Date().getFullYear();
-  const month = period?.month || new Date().getMonth() + 1;
+  const year = selectedYear || new Date().getFullYear();
+  const month = Number(document.querySelector('#edit-month-select')?.value || new Date().getMonth() + 1);
   try {
     const data = await api(`/api/clients/${encodeURIComponent(clientId)}/months/${year}/${month}`);
     const weeks = data.weeks.map((week) => ({ ...week }));
@@ -366,7 +378,7 @@ function renderMeetings() {
 function renderCards() {
   if (!detail.cards.length) return '<div class="client-empty-state compact">No hay tarjetas relacionadas con este cliente.</div>';
   const boardById = new Map(state.boards.map((board) => [board.id, board]));
-  return `<div class="client-task-list">${detail.cards.map((card) => { const board = boardById.get(card.boardId); const column = board?.columns.find((item) => item.id === card.columnId); return `<a href="/kanban?board=${encodeURIComponent(card.boardId)}" class="client-task-item"><div><h3>${escapeHtml(card.title)}</h3><p>${escapeHtml(board?.name || 'Tablero')} · ${escapeHtml(column?.name || 'Sin columna')}</p></div><span>${card.dueDate ? formatDate(card.dueDate) : 'Sin fecha'}</span></a>`; }).join('')}</div>`;
+  return `<div class="client-task-list">${detail.cards.map((card) => { const board = boardById.get(card.boardId); const column = board?.columns.find((item) => item.id === card.columnId); return `<a href="/kanban?board=${encodeURIComponent(card.boardId)}" class="client-task-item"><div><h3>${escapeHtml(card.title)}</h3><p>${escapeHtml(board?.name || 'Tablero')} · ${escapeHtml(column?.name || 'Sin columna')}</p></div><span>${card.resolved ? 'Resuelta' : card.dueDate ? formatDate(card.dueDate) : 'Sin fecha'}</span></a>`; }).join('')}</div>`;
 }
 
 function formatMetric(value, money) {

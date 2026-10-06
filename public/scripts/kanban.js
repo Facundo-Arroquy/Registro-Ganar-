@@ -98,7 +98,7 @@ function renderClientFilter(board) {
 function renderCard(card) {
   const client = state.clients.find((item) => item.id === card.clientId);
   const assignee = state.users.find((item) => item.id === card.assignedTo);
-  const dueStatus = getDueDateStatus(card.dueDate);
+  const dueStatus = getDueDateStatus(card.dueDate, card.resolved);
   return `
     <article class="card" draggable="true" id="${escapeHtml(card.id)}" data-card-id="${escapeHtml(card.id)}">
       ${client ? `<div class="client-badge">${escapeHtml(client.company)}</div>` : ''}
@@ -106,7 +106,8 @@ function renderCard(card) {
       ${card.description ? `<div class="card-description">${escapeHtml(card.description)}</div>` : ''}
       <div class="badges-container">
         ${card.recurringTaskId ? '<div class="recurring-badge" title="Tarea recurrente">↻ Recurrente</div>' : ''}
-        ${dueStatus ? `<div class="due-date-badge ${dueStatus.status}">${escapeHtml(dueStatus.label)}</div>` : ''}
+        ${card.resolved ? '<div class="due-date-badge resolved">Resuelta</div>' : dueStatus ? `<div class="due-date-badge ${dueStatus.status}">${escapeHtml(dueStatus.label)}</div>` : ''}
+        <button class="quick-resolve-btn ${card.resolved ? 'reopen' : ''}" type="button" data-toggle-resolved="${escapeHtml(card.id)}">${card.resolved ? 'Reabrir' : 'Resolver'}</button>
         ${renderCardTimer(card)}
       </div>
       <div class="card-meta">
@@ -173,6 +174,12 @@ function bindKanbanEvents() {
     button.addEventListener('click', async (event) => {
       event.stopPropagation();
       await controlTimer(button.dataset.timerCard, button.dataset.timerAction, button);
+    });
+  });
+  document.querySelectorAll('[data-toggle-resolved]').forEach((button) => {
+    button.addEventListener('click', async (event) => {
+      event.stopPropagation();
+      await toggleCardResolved(button.dataset.toggleResolved, button);
     });
   });
   document.querySelectorAll('[data-card-drop]').forEach((drop) => {
@@ -272,10 +279,16 @@ function openCardModal(columnId, card = null) {
       <form class="modal">
         <div class="modal-header">${isEdit ? 'Detalle de la Tarjeta' : 'Nueva Tarjeta'}</div>
         <div class="form-group"><label>Titulo</label><input type="text" id="card-title-input" class="form-control" value="${escapeHtml(card?.title || '')}"></div>
-        <div class="form-group"><label>Cliente</label><select id="card-client-select" class="form-control">${clientOptions(card?.clientId)}</select></div>
+        <div class="form-group searchable-client-field">
+          <label for="card-client-search">Cliente</label>
+          <input type="search" id="card-client-search" class="form-control" autocomplete="off" placeholder="Escribí para buscar..." value="${escapeHtml(clientLabel(card?.clientId))}">
+          <input type="hidden" id="card-client-id" value="${escapeHtml(card?.clientId || '')}">
+          <div class="client-search-results" data-client-results hidden></div>
+        </div>
         <div class="form-group"><label>Descripcion</label><textarea id="card-desc-input" class="form-control" rows="3">${escapeHtml(card?.description || '')}</textarea></div>
         <div class="form-group" data-due-date><label>Fecha de Vencimiento</label><input type="date" id="card-due-input" class="form-control" value="${escapeHtml(card?.dueDate || '')}"></div>
         <div class="form-group"><label>Asignar a</label><select id="card-assignee-select" class="form-control">${userOptions(card?.assignedTo)}</select></div>
+        <div class="form-group"><label class="checkbox-group"><input type="checkbox" id="card-resolved-input" ${card?.resolved ? 'checked' : ''}><span>Resuelta (no aparecerá como vencida)</span></label></div>
         ${!isEdit ? `
           <div class="form-group recurrence-toggle">
             <label class="checkbox-group"><input type="checkbox" id="card-recurring-toggle"><span>Repetir esta tarea</span></label>
@@ -304,6 +317,7 @@ function openCardModal(columnId, card = null) {
       </form>
     </div>
   `);
+  setupClientSearch(overlay, card?.clientId || '');
   const recurrenceToggle = overlay.querySelector('#card-recurring-toggle');
   recurrenceToggle?.addEventListener('change', () => {
     overlay.querySelector('[data-recurrence-settings]').hidden = !recurrenceToggle.checked;
@@ -382,10 +396,11 @@ async function saveCard(columnId, card) {
   const payload = {
     columnId,
     title: document.querySelector('#card-title-input').value.trim(),
-    clientId: document.querySelector('#card-client-select').value,
+    clientId: document.querySelector('#card-client-id').value,
     description: document.querySelector('#card-desc-input').value.trim(),
     dueDate: document.querySelector('#card-due-input').value,
     assignedTo: document.querySelector('#card-assignee-select').value,
+    resolved: document.querySelector('#card-resolved-input').checked,
     createdBy: currentUser.id,
     ...auditUser()
   };
@@ -432,6 +447,28 @@ async function moveCard(cardId, columnId) {
   } catch (error) {
     alert(error.message);
     await refresh();
+  }
+}
+
+async function toggleCardResolved(cardId, button) {
+  if (button.disabled) return;
+  const board = getActiveBoard(state);
+  const card = board.cards.find((item) => item.id === cardId);
+  if (!card) return;
+  button.disabled = true;
+  try {
+    const response = await api(`/api/boards/${board.id}/cards/${card.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ resolved: !card.resolved, ...auditUser() })
+    });
+    if (typeof response.card?.resolved !== 'boolean') {
+      throw new Error('El servidor está desactualizado. Reinicialo después de aplicar las migraciones.');
+    }
+    card.resolved = response.card.resolved;
+    renderActiveBoard();
+  } catch (error) {
+    button.disabled = false;
+    alert(error.message);
   }
 }
 
@@ -547,10 +584,36 @@ function openBoardSettings() {
   });
 }
 
-function clientOptions(selectedId = '') {
-  return `<option value="">Sin Cliente</option>${state.clients.map((client) => `
-    <option value="${escapeHtml(client.id)}" ${client.id === selectedId ? 'selected' : ''}>${escapeHtml(client.name)} (${escapeHtml(client.company)})</option>
-  `).join('')}`;
+function clientLabel(selectedId = '') {
+  const client = state.clients.find((item) => item.id === selectedId);
+  return client ? `${client.company || client.name} — ${client.name}` : '';
+}
+
+function setupClientSearch(overlay, selectedId = '') {
+  const search = overlay.querySelector('#card-client-search');
+  const hidden = overlay.querySelector('#card-client-id');
+  const results = overlay.querySelector('[data-client-results]');
+  const renderResults = () => {
+    const term = search.value.trim().toLocaleLowerCase('es');
+    const matches = state.clients
+      .filter((client) => !term || `${client.company} ${client.name}`.toLocaleLowerCase('es').includes(term))
+      .slice(0, 10);
+    results.innerHTML = `<button type="button" data-client-id="">Sin cliente</button>${matches.map((client) => `<button type="button" data-client-id="${escapeHtml(client.id)}"><strong>${escapeHtml(client.company || client.name)}</strong><span>${escapeHtml(client.name)}</span></button>`).join('')}`;
+    results.hidden = false;
+    results.querySelectorAll('[data-client-id]').forEach((button) => button.addEventListener('mousedown', (event) => {
+      event.preventDefault();
+      hidden.value = button.dataset.clientId;
+      search.value = clientLabel(hidden.value);
+      results.hidden = true;
+    }));
+  };
+  search.addEventListener('focus', renderResults);
+  search.addEventListener('input', () => {
+    if (search.value !== clientLabel(hidden.value)) hidden.value = '';
+    renderResults();
+  });
+  search.addEventListener('blur', () => setTimeout(() => { results.hidden = true; }, 100));
+  hidden.value = selectedId;
 }
 
 function userOptions(selectedId = '') {

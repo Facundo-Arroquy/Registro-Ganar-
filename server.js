@@ -383,7 +383,7 @@ async function generateRecurringCardsThroughToday() {
 }
 
 async function getSupabaseState() {
-  const [users, statuses, consultors, complexities, adStatuses, auditRows, clients, boards, columns, cards, recurringTasks, recurringDays, clientLinks, generalLinks] = await Promise.all([
+  const [users, statuses, consultors, complexities, adStatuses, auditRows, clients, consultorAssignments, boards, columns, cards, recurringTasks, recurringDays, clientLinks, generalLinks] = await Promise.all([
     supabaseRest('/app_users?select=id,email,name&order=name.asc'),
     getSupabaseStatuses(),
     getSupabaseConsultors(),
@@ -391,9 +391,10 @@ async function getSupabaseState() {
     getSupabaseAdStatuses(),
     supabaseRest('/settings_audit?select=action,user_id,user_name,created_at&order=created_at.desc&limit=50'),
     supabaseRest('/clients?select=id,name,company,email,owner_id,status_id,consultor_id,complexity_id,ad_status_id,meli_user,meli_password,vs_category,meeting_day,meeting_time,meeting_frequency,time_bank_seconds'),
+    supabaseRest('/client_consultor_assignments?select=client_id,consultor_id'),
     supabaseRest('/boards?select=id,name,color,position&order=position.asc'),
     supabaseRest('/board_columns?select=id,board_id,name,position&order=position.asc'),
-    supabaseRest('/cards?select=id,board_id,column_id,client_id,title,description,due_date,created_by,assigned_to,timer_status,timer_elapsed_seconds,timer_started_at,recurring_task_id,occurrence_date'),
+    supabaseRest('/cards?select=id,board_id,column_id,client_id,title,description,due_date,resolved,created_by,assigned_to,timer_status,timer_elapsed_seconds,timer_started_at,recurring_task_id,occurrence_date'),
     supabaseRest('/recurring_tasks?select=id,board_id,title,start_date,end_date,active'),
     supabaseRest('/recurring_task_days?select=recurring_task_id,weekday,column_id'),
     supabaseRest('/client_links?select=id,client_id,url,label'),
@@ -412,7 +413,8 @@ async function getSupabaseState() {
       email: client.email || '',
       ownerId: client.owner_id || '',
       status: statusMap.get(client.status_id)?.name || 'Activo',
-      consultor: consultorMap.get(client.consultor_id)?.name || '',
+      consultors: consultorAssignments.filter((item) => item.client_id === client.id).map((item) => consultorMap.get(item.consultor_id)?.name).filter(Boolean),
+      consultor: consultorAssignments.filter((item) => item.client_id === client.id).map((item) => consultorMap.get(item.consultor_id)?.name).filter(Boolean).join(', ') || consultorMap.get(client.consultor_id)?.name || '',
       complexity: complexityMap.get(client.complexity_id)?.name || '',
       adStatus: adStatusMap.get(client.ad_status_id)?.name || '',
       meliUser: client.meli_user || '',
@@ -443,6 +445,7 @@ async function getSupabaseState() {
         title: card.title,
         description: card.description || '',
         dueDate: card.due_date || '',
+        resolved: Boolean(card.resolved),
         createdBy: card.created_by || '',
         assignedTo: card.assigned_to || '',
         recurringTaskId: card.recurring_task_id || '',
@@ -508,6 +511,27 @@ async function getConsultorIdByName(consultorName) {
   if (!consultorName) return null;
   const consultors = await supabaseRest(`/client_consultors?select=id,name&name=eq.${encodeURIComponent(consultorName)}&limit=1`);
   return consultors[0]?.id || null;
+}
+
+function normalizeConsultorNames(value, fallback = []) {
+  const source = Array.isArray(value) ? value : value === undefined ? fallback : [value];
+  return [...new Set(source.map((name) => String(name || '').trim()).filter(Boolean))];
+}
+
+async function getConsultorIdsByNames(names) {
+  if (!names.length) return [];
+  const consultors = await getSupabaseConsultors();
+  const byName = new Map(consultors.map((item) => [item.name.toLocaleLowerCase('es'), item.id]));
+  return names.map((name) => byName.get(name.toLocaleLowerCase('es'))).filter(Boolean);
+}
+
+async function replaceClientConsultors(clientId, consultorIds) {
+  await supabaseRest(`/client_consultor_assignments?client_id=eq.${encodeURIComponent(clientId)}`, { method: 'DELETE' });
+  if (!consultorIds.length) return;
+  await supabaseRest('/client_consultor_assignments', {
+    method: 'POST',
+    body: JSON.stringify(consultorIds.map((consultorId) => ({ client_id: clientId, consultor_id: consultorId })))
+  });
 }
 
 async function getSupabaseStatuses() {
@@ -670,8 +694,12 @@ async function getSupabaseSettings() {
 }
 
 async function getSupabaseClient(clientId) {
-  const [client] = await supabaseRest(`/clients?select=id,name,company,email,owner_id,meeting_day,meeting_time,meeting_frequency,time_bank_seconds,complexity_id,ad_status_id,meli_user,meli_password,vs_category,status:client_statuses(name),consultor:client_consultors(name),complexity:complexities(name),ad_status:ad_statuses(name)&id=eq.${encodeURIComponent(clientId)}&limit=1`);
+  const [[client], assignments] = await Promise.all([
+    supabaseRest(`/clients?select=id,name,company,email,owner_id,meeting_day,meeting_time,meeting_frequency,time_bank_seconds,complexity_id,ad_status_id,meli_user,meli_password,vs_category,status:client_statuses(name),consultor:client_consultors!clients_consultor_id_fkey(name),complexity:complexities(name),ad_status:ad_statuses(name)&id=eq.${encodeURIComponent(clientId)}&limit=1`),
+    supabaseRest(`/client_consultor_assignments?select=consultor:client_consultors(name)&client_id=eq.${encodeURIComponent(clientId)}`)
+  ]);
   if (!client) return null;
+  const consultors = assignments.map((item) => item.consultor?.name).filter(Boolean);
   return {
     id: client.id,
     name: client.name,
@@ -679,7 +707,8 @@ async function getSupabaseClient(clientId) {
     email: client.email || '',
     ownerId: client.owner_id || '',
     status: client.status?.name || 'Activo',
-    consultor: client.consultor?.name || '',
+    consultors,
+    consultor: consultors.join(', ') || client.consultor?.name || '',
     complexity: client.complexity?.name || '',
     adStatus: client.ad_status?.name || '',
     meliUser: client.meli_user || '',
@@ -697,7 +726,7 @@ async function getSupabaseBoard(boardId) {
   const [[board], columns, cards] = await Promise.all([
     supabaseRest(`/boards?select=id,name,color&id=eq.${encodedId}&limit=1`),
     supabaseRest(`/board_columns?select=id,name&board_id=eq.${encodedId}&order=position.asc`),
-    supabaseRest(`/cards?select=id,column_id,client_id,title,description,due_date,created_by,assigned_to,timer_status,timer_elapsed_seconds,timer_started_at,recurring_task_id,occurrence_date&board_id=eq.${encodedId}`)
+    supabaseRest(`/cards?select=id,column_id,client_id,title,description,due_date,resolved,created_by,assigned_to,timer_status,timer_elapsed_seconds,timer_started_at,recurring_task_id,occurrence_date&board_id=eq.${encodedId}`)
   ]);
   if (!board) return null;
   return {
@@ -712,6 +741,7 @@ async function getSupabaseBoard(boardId) {
       title: card.title,
       description: card.description || '',
       dueDate: card.due_date || '',
+      resolved: Boolean(card.resolved),
       createdBy: card.created_by || '',
       assignedTo: card.assigned_to || '',
       recurringTaskId: card.recurring_task_id || '',
@@ -1391,7 +1421,7 @@ async function handleApi(req, res, url) {
       email: String(body.email || '').trim(),
       ownerId: String(body.ownerId || ''),
       status: String(body.status || 'Activo').trim(),
-      consultor: String(body.consultor || '').trim(),
+      consultors: normalizeConsultorNames(body.consultors, normalizeConsultorNames(body.consultor)),
       complexity: String(body.complexity || '').trim(),
       adStatus: String(body.adStatus || '').trim(),
       meliUser: String(body.meliUser || '').trim(),
@@ -1402,9 +1432,9 @@ async function handleApi(req, res, url) {
       meetingFrequency: parseMeetingFrequency(body.meetingFrequency)
     };
     if (!client.name || !client.company) return sendError(res, 400, 'Nombre y empresa son obligatorios');
-    const [statusId, consultorId, complexityId, adStatusId] = await Promise.all([
+    const [statusId, consultorIds, complexityId, adStatusId] = await Promise.all([
       getStatusIdByName(client.status),
-      getConsultorIdByName(client.consultor),
+      getConsultorIdsByNames(client.consultors),
       getComplexityIdByName(client.complexity),
       getAdStatusIdByName(client.adStatus)
     ]);
@@ -1418,7 +1448,7 @@ async function handleApi(req, res, url) {
         email: client.email || null,
         owner_id: client.ownerId || null,
         status_id: statusId,
-        consultor_id: consultorId,
+        consultor_id: consultorIds[0] || null,
         complexity_id: complexityId,
         ad_status_id: adStatusId,
         meli_user: client.meliUser || null,
@@ -1429,8 +1459,9 @@ async function handleApi(req, res, url) {
         meeting_frequency: client.meetingFrequency
       }])
     });
+    await replaceClientConsultors(createdClient.id, consultorIds);
     recordAuditInBackground(body, `Creo el cliente "${client.name}"`);
-    return sendJson(res, 201, { client: { ...client, id: createdClient.id } });
+    return sendJson(res, 201, { client: { ...client, consultor: client.consultors.join(', '), id: createdClient.id } });
   }
 
   if (segments[0] === 'api' && segments[1] === 'clients' && segments[2]) {
@@ -1449,7 +1480,7 @@ async function handleApi(req, res, url) {
         }),
         supabaseRest('/weekly_reports?select=id,week_label,status,meetings,created_at,updated_at&order=created_at.desc'),
         supabaseRest(`/calendar_events?select=id,title,starts_at,duration_minutes,notes,recurrence_unit,recurrence_interval,recurrence_until&client_id=eq.${encodedClientId}&order=starts_at.desc`),
-        supabaseRest(`/cards?select=id,board_id,column_id,title,description,due_date,assigned_to,updated_at&client_id=eq.${encodedClientId}&order=updated_at.desc`),
+        supabaseRest(`/cards?select=id,board_id,column_id,title,description,due_date,resolved,assigned_to,updated_at&client_id=eq.${encodedClientId}&order=updated_at.desc`),
         supabaseRest(`/client_comments?select=id,content,created_by,author_name,created_at,updated_at&client_id=eq.${encodedClientId}&order=created_at.desc`).catch((error) => {
           if (/client_comments|schema cache/i.test(error.message)) return [];
           throw error;
@@ -1488,7 +1519,7 @@ async function handleApi(req, res, url) {
         })),
         cards: cards.map((item) => ({
           id: item.id, boardId: item.board_id, columnId: item.column_id, title: item.title,
-          description: item.description || '', dueDate: item.due_date || '', assignedTo: item.assigned_to || ''
+          description: item.description || '', dueDate: item.due_date || '', resolved: Boolean(item.resolved), assignedTo: item.assigned_to || ''
         }))
       });
     }
@@ -1498,10 +1529,6 @@ async function handleApi(req, res, url) {
       const month = Number(segments[5]);
       if (!Number.isInteger(year) || year < 2000 || year > 2200 || !Number.isInteger(month) || month < 1 || month > 12) {
         return sendError(res, 400, 'Periodo invalido');
-      }
-      const currentPeriod = currentArgentinaPeriod();
-      if (year !== currentPeriod.year || month !== currentPeriod.month) {
-        return sendError(res, 400, 'Solo se puede editar el mes en curso');
       }
       const encodedClientId = encodeURIComponent(client.id);
       if (req.method === 'GET') {
@@ -1597,7 +1624,7 @@ async function handleApi(req, res, url) {
         email: body.email === undefined ? client.email : String(body.email).trim(),
         ownerId: body.ownerId === undefined ? client.ownerId || '' : String(body.ownerId),
         status: body.status === undefined ? client.status || 'Activo' : String(body.status || 'Activo').trim(),
-        consultor: body.consultor === undefined ? client.consultor || '' : String(body.consultor || '').trim(),
+        consultors: normalizeConsultorNames(body.consultors, client.consultors || normalizeConsultorNames(client.consultor)),
         complexity: body.complexity === undefined ? client.complexity || '' : String(body.complexity || '').trim(),
         adStatus: body.adStatus === undefined ? client.adStatus || '' : String(body.adStatus || '').trim(),
         meliUser: body.meliUser === undefined ? client.meliUser || '' : String(body.meliUser || '').trim(),
@@ -1608,9 +1635,9 @@ async function handleApi(req, res, url) {
         meetingFrequency: body.meetingFrequency === undefined ? client.meetingFrequency : parseMeetingFrequency(body.meetingFrequency)
       };
       if (!payload.name || !payload.company) return sendError(res, 400, 'Nombre y empresa son obligatorios');
-      const [statusId, consultorId, complexityId, adStatusId] = await Promise.all([
+      const [statusId, consultorIds, complexityId, adStatusId] = await Promise.all([
         getStatusIdByName(payload.status),
-        getConsultorIdByName(payload.consultor),
+        getConsultorIdsByNames(payload.consultors),
         getComplexityIdByName(payload.complexity),
         getAdStatusIdByName(payload.adStatus)
       ]);
@@ -1623,7 +1650,7 @@ async function handleApi(req, res, url) {
           email: payload.email || null,
           owner_id: payload.ownerId || null,
           status_id: statusId,
-          consultor_id: consultorId,
+          consultor_id: consultorIds[0] || null,
           complexity_id: complexityId,
           ad_status_id: adStatusId,
           meli_user: payload.meliUser || null,
@@ -1634,8 +1661,9 @@ async function handleApi(req, res, url) {
           meeting_frequency: payload.meetingFrequency
         })
       });
+      await replaceClientConsultors(client.id, consultorIds);
       recordAuditInBackground(body, `Modifico el cliente "${client.name}"`);
-      return sendJson(res, 200, { client: { id: client.id, ...payload } });
+      return sendJson(res, 200, { client: { id: client.id, ...payload, consultor: payload.consultors.join(', ') } });
     }
 
     if (req.method === 'POST' && segments[3] === 'time-bank' && segments[4] === 'reset') {
@@ -1885,6 +1913,7 @@ async function handleApi(req, res, url) {
         title,
         description: String(body.description || '').trim(),
         dueDate: String(body.dueDate || ''),
+        resolved: Boolean(body.resolved),
         createdBy: String(body.createdBy || ''),
         assignedTo: String(body.assignedTo || ''),
         timerStatus: 'idle',
@@ -1903,6 +1932,7 @@ async function handleApi(req, res, url) {
           title: card.title,
           description: card.description,
           due_date: card.dueDate || null,
+          resolved: card.resolved,
           created_by: card.createdBy || null,
           assigned_to: card.assignedTo || null
         }])
@@ -1922,6 +1952,7 @@ async function handleApi(req, res, url) {
         clientId: body.clientId === undefined ? card.clientId : String(body.clientId),
         description: body.description === undefined ? card.description : String(body.description).trim(),
         dueDate: body.dueDate === undefined ? card.dueDate : String(body.dueDate),
+        resolved: body.resolved === undefined ? card.resolved : Boolean(body.resolved),
         assignedTo: body.assignedTo === undefined ? card.assignedTo : String(body.assignedTo),
         columnId: body.columnId === undefined ? card.columnId : String(body.columnId)
       });
@@ -1936,6 +1967,7 @@ async function handleApi(req, res, url) {
           title: card.title,
           description: card.description,
           due_date: card.dueDate || null,
+          resolved: card.resolved,
           assigned_to: card.assignedTo || null
         })
       });
