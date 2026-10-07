@@ -2985,6 +2985,92 @@ header {
   background: rgba(56, 139, 253, 0.08);
 }
 
+.metrics-table td.projection-column.projection-better {
+  background: rgba(63, 185, 80, 0.14);
+  color: #7ee787;
+  font-weight: 700;
+  box-shadow: inset 3px 0 0 rgba(63, 185, 80, 0.62);
+}
+
+.metrics-table td.projection-column.projection-worse {
+  background: rgba(248, 81, 73, 0.14);
+  color: #ff7b72;
+  font-weight: 700;
+  box-shadow: inset 3px 0 0 rgba(248, 81, 73, 0.62);
+}
+
+.advertising-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 22px;
+}
+
+.advertising-table {
+  min-width: 820px;
+}
+
+.advertising-table .monthly-close-column {
+  border-left: 1px solid rgba(163, 113, 247, 0.48);
+  background: rgba(163, 113, 247, 0.09);
+}
+
+.advertising-table td.tacos-over-target {
+  background: rgba(248, 81, 73, 0.14);
+  color: #ff7b72;
+  font-weight: 700;
+}
+
+.advertising-table td.monthly-close-column.tacos-over-target {
+  background: rgba(248, 81, 73, 0.18);
+  box-shadow: inset 3px 0 0 rgba(248, 81, 73, 0.65);
+}
+
+.advertising-editor-modal {
+  width: min(960px, calc(100vw - 32px));
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+}
+
+.advertising-editor-wrap {
+  margin-top: 16px;
+  overflow-x: auto;
+}
+
+.advertising-editor-table {
+  width: 100%;
+  min-width: 790px;
+  border-collapse: collapse;
+}
+
+.advertising-editor-table th,
+.advertising-editor-table td {
+  padding: 8px;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 0.75rem;
+  text-align: left;
+}
+
+.advertising-editor-table th:not(:first-child) {
+  text-align: center;
+}
+
+.ad-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.ad-input-wrap span {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.ad-input-wrap .form-control {
+  min-width: 95px;
+  padding: 8px;
+}
+
 .projection-note,
 .form-hint {
   margin-top: 10px;
@@ -3395,7 +3481,8 @@ header {
   }
 
   .client-info-grid,
-  .metrics-kpis {
+  .metrics-kpis,
+  .advertising-summary {
     grid-template-columns: 1fr;
   }
 

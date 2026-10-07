@@ -1472,10 +1472,14 @@ async function handleApi(req, res, url) {
     if (req.method === 'GET' && segments[3] === 'detail' && segments.length === 4) {
       const encodedClientId = encodeURIComponent(client.id);
       const currentPeriod = currentArgentinaPeriod();
-      const [links, metrics, reports, calendarEvents, cards, manualComments] = await Promise.all([
+      const [links, metrics, advertisingMetrics, reports, calendarEvents, cards, manualComments] = await Promise.all([
         supabaseRest(`/client_links?select=id,url,label&client_id=eq.${encodedClientId}&order=created_at.asc`),
         supabaseRest(`/client_monthly_metrics?select=id,year,month,metric_type,value&client_id=eq.${encodedClientId}&order=year.desc,month.asc`).catch((error) => {
           if (/client_monthly_metrics|schema cache/i.test(error.message)) return [];
+          throw error;
+        }),
+        supabaseRest(`/client_weekly_ad_metrics?select=year,month,week,roas,tacos,daily_budget,consumed_budget,target_tacos&client_id=eq.${encodedClientId}&order=year.desc,month.desc,week.asc`).catch((error) => {
+          if (/client_weekly_ad_metrics|schema cache/i.test(error.message)) return [];
           throw error;
         }),
         supabaseRest('/weekly_reports?select=id,week_label,status,meetings,created_at,updated_at&order=created_at.desc'),
@@ -1502,6 +1506,14 @@ async function handleApi(req, res, url) {
       return sendJson(res, 200, {
         client: { ...client, links },
         metrics: derivedMonthlyMetrics(metrics),
+        advertisingMetrics: advertisingMetrics.map((item) => ({
+          year: Number(item.year), month: Number(item.month), week: Number(item.week),
+          roas: item.roas === null ? null : Number(item.roas),
+          tacos: item.tacos === null ? null : Number(item.tacos),
+          dailyBudget: item.daily_budget === null ? null : Number(item.daily_budget),
+          consumedBudget: item.consumed_budget === null ? null : Number(item.consumed_budget),
+          targetTacos: item.target_tacos === null ? null : Number(item.target_tacos)
+        })),
         currentPeriodSummary,
         comments,
         manualComments: manualComments.map((item) => ({
@@ -1522,6 +1534,53 @@ async function handleApi(req, res, url) {
           description: item.description || '', dueDate: item.due_date || '', resolved: Boolean(item.resolved), assignedTo: item.assigned_to || ''
         }))
       });
+    }
+
+    if (segments[3] === 'advertising' && segments[4] && segments[5] && segments.length === 6) {
+      const year = Number(segments[4]);
+      const month = Number(segments[5]);
+      if (!Number.isInteger(year) || year < 2000 || year > 2200 || !Number.isInteger(month) || month < 1 || month > 12) {
+        return sendError(res, 400, 'Periodo invalido');
+      }
+      const encodedClientId = encodeURIComponent(client.id);
+      if (req.method === 'GET') {
+        const rows = await supabaseRest(`/client_weekly_ad_metrics?select=week,roas,tacos,daily_budget,consumed_budget,target_tacos&client_id=eq.${encodedClientId}&year=eq.${year}&month=eq.${month}&order=week.asc`);
+        const weeks = Array.from({ length: 5 }, (_, index) => {
+          const saved = rows.find((item) => Number(item.week) === index + 1);
+          return {
+            week: index + 1,
+            roas: saved?.roas === null || saved?.roas === undefined ? null : Number(saved.roas),
+            tacos: saved?.tacos === null || saved?.tacos === undefined ? null : Number(saved.tacos),
+            dailyBudget: saved?.daily_budget === null || saved?.daily_budget === undefined ? null : Number(saved.daily_budget),
+            consumedBudget: saved?.consumed_budget === null || saved?.consumed_budget === undefined ? null : Number(saved.consumed_budget),
+            targetTacos: saved?.target_tacos === null || saved?.target_tacos === undefined ? null : Number(saved.target_tacos)
+          };
+        });
+        return sendJson(res, 200, { year, month, totalDays: daysInMonth(year, month), weeks });
+      }
+      if (req.method === 'PUT') {
+        const nullableNumber = (value) => value === '' || value === null || value === undefined ? null : Number(value);
+        const weeks = Array.isArray(body.weeks) ? body.weeks.map((item, index) => ({
+          week: index + 1,
+          roas: nullableNumber(item.roas),
+          tacos: nullableNumber(item.tacos),
+          daily_budget: nullableNumber(item.dailyBudget),
+          consumed_budget: nullableNumber(item.consumedBudget),
+          target_tacos: nullableNumber(item.targetTacos)
+        })) : [];
+        const numericKeys = ['roas', 'tacos', 'daily_budget', 'consumed_budget', 'target_tacos'];
+        const invalid = weeks.length !== 5 || weeks.some((week) =>
+          numericKeys.some((key) => week[key] !== null && (!Number.isFinite(week[key]) || week[key] < 0))
+          || ['tacos', 'target_tacos'].some((key) => week[key] !== null && week[key] > 100)
+        );
+        if (invalid) return sendError(res, 400, 'Los valores de publicidad son invalidos');
+        await supabaseRest('/rpc/save_client_weekly_ad_metrics', {
+          method: 'POST',
+          body: JSON.stringify({ p_client_id: client.id, p_year: year, p_month: month, p_weeks: weeks })
+        });
+        recordAuditInBackground(body, `Actualizo publicidad de ${month}/${year} de "${client.company}"`);
+        return sendJson(res, 200, { ok: true });
+      }
     }
 
     if (segments[3] === 'months' && segments[4] && segments[5] && segments.length === 6) {
