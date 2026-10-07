@@ -2195,6 +2195,7 @@ async function serveStatic(req, res, url) {
     '/dashboard': 'dashboard.html',
     '/clientes': 'clientes.html',
     '/cliente': 'cliente.html',
+    '/publicidad': 'publicidad.html',
     '/configuracion': 'configuracion.html',
     '/tableros': 'tableros.html',
     '/calendarios': 'calendarios.html',

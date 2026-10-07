@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Publicidad | WIM</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles/app.css">
+</head>
+<body data-page="publicidad">
+  <button class="sidebar-toggle" type="button" aria-label="Abrir menu">&#9776;</button>
+  <div class="sidebar-overlay"></div>
+  <aside data-sidebar></aside>
+  <main>
+    <div class="advertising-page">
+      <div class="page-heading">
+        <div>
+          <p class="eyebrow">Clientes</p>
+          <h1>Publicidad</h1>
+          <p class="page-subtitle">Seguimiento semanal y cierre mensual de campañas.</p>
+        </div>
+      </div>
+      <section class="advertising-client-picker">
+        <div class="advertising-picker-heading"><div><strong>Clientes visibles</strong><span id="advertising-selection-count"></span></div><div><button class="btn btn-secondary btn-sm" type="button" id="select-all-advertising">Todos</button><button class="btn btn-secondary btn-sm" type="button" id="clear-advertising-selection">Ninguno</button></div></div>
+        <div class="advertising-client-options" id="advertising-client-options"></div>
+      </section>
+      <section class="client-detail-section advertising-workspace">
+        <div class="advertising-toolbar">
+          <label><span>Año</span><select class="form-control" id="advertising-year"></select></label>
+          <label><span>Mes</span><select class="form-control" id="advertising-month"></select></label>
+        </div>
+        <div class="advertising-client-grids" id="advertising-global-content"><div class="client-empty-state">Cargando publicidad...</div></div>
+      </section>
+    </div>
+  </main>
+  <div id="modal-root"></div>
+  <script type="module" src="/scripts/publicidad.js"></script>
+</body>
+</html>
