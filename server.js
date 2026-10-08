@@ -2112,13 +2112,13 @@ async function handleApi(req, res, url) {
 
       // If finalized with snapshot, return frozen data
       if (report.status === 'final' && report.meetings?.snapshot) {
-        const snapshot = report.meetings.snapshot;
-        const selectedClientIds = Array.isArray(report.meetings?.selectedClients) ? report.meetings.selectedClients.map(String) : [];
+        const { snapshot, ...meetingsWithoutSnapshot } = report.meetings || {};
+        const selectedClientIds = Array.isArray(meetingsWithoutSnapshot?.selectedClients) ? meetingsWithoutSnapshot.selectedClients.map(String) : [];
         return sendJson(res, 200, {
           report: {
             id: report.id, weekLabel: report.week_label, status: report.status,
             daysElapsed: report.days_elapsed, notes: report.notes,
-            meetings: { ...(report.meetings || {}), selectedClients: selectedClientIds },
+            meetings: { ...meetingsWithoutSnapshot, selectedClients: selectedClientIds, snapshotSettings: snapshot.settings },
             createdAt: report.created_at, createdBy: report.created_by
           },
           clientData: snapshot.clientData,
@@ -2238,7 +2238,7 @@ async function handleApi(req, res, url) {
       ]),
       clientSummaries,
       calendarEvents,
-      settings: appState.settings
+      settings: { clientStatuses: appState.settings.clientStatuses, clientConsultors: appState.settings.clientConsultors, complexities: appState.settings.complexities, adStatuses: appState.settings.adStatuses }
     };
 
     const updatedMeetings = { ...(report.meetings || {}), snapshot };

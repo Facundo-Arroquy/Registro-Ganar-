@@ -32,8 +32,8 @@ async function loadReport() {
   const reportClientIds = new Set((report.meetings?.selectedClients || []).map(String));
   calendarEvents = (data.calendarEvents || []).filter((event) => reportClientIds.has(String(event.clientId)));
   // If finalized with snapshot settings, use them for badge colors
-  if (report.status === 'final' && report.meetings?.snapshot?.settings) {
-    state.settings = report.meetings.snapshot.settings;
+  if (report.status === 'final' && report.meetings?.snapshotSettings) {
+    state.settings = report.meetings.snapshotSettings;
   }
 }
 
