@@ -2255,6 +2255,16 @@ header {
   font-weight: bold;
 }
 
+.weekly-slide td.highlight-cell.estimated-up {
+  background-color: #d4edda;
+  color: #155724;
+}
+
+.weekly-slide td.highlight-cell.estimated-down {
+  background-color: #f8d7da;
+  color: #721c24;
+}
+
 /* Tags for consultor */
 .tag {
   padding: 3px 8px;
@@ -2555,15 +2565,143 @@ header {
 /* ========== Print / PDF Export ========== */
 /* Client directory and profile */
 [data-page="clientes"] main,
-[data-page="cliente"] main {
+[data-page="cliente"] main,
+[data-page="publicidad"] main {
   overflow-y: auto;
 }
 
 .clients-page,
-.client-detail-page {
+.client-detail-page,
+.advertising-page {
   width: min(1220px, 100%);
   margin: 0 auto;
   padding: 42px 36px 64px;
+}
+
+.advertising-workspace {
+  margin-top: 28px;
+}
+
+.advertising-client-picker {
+  margin-top: 24px;
+  padding: 16px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+}
+
+.advertising-picker-heading,
+.advertising-picker-heading > div,
+.advertising-grid-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.advertising-picker-heading {
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.advertising-picker-heading span {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.advertising-client-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  max-height: 230px;
+  overflow-y: auto;
+}
+
+.advertising-client-option {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 9px 11px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.advertising-client-option:has(input:checked) {
+  border-color: var(--accent-blue);
+  background: rgba(56, 139, 253, 0.1);
+}
+
+.advertising-client-option span,
+.advertising-client-option strong,
+.advertising-client-option small {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.advertising-client-option small {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+}
+
+.advertising-toolbar {
+  display: flex;
+  align-items: end;
+  gap: 10px;
+  margin-bottom: 24px;
+}
+
+.advertising-toolbar label {
+  width: 120px;
+}
+
+.advertising-client-grids {
+  display: grid;
+  gap: 22px;
+}
+
+.advertising-client-grid {
+  min-width: 0;
+  padding-bottom: 22px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.advertising-client-grid:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.advertising-toolbar label > span {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.advertising-toolbar .btn {
+  min-height: 38px;
+  white-space: nowrap;
+}
+
+.advertising-client-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.advertising-client-heading h2 {
+  font-size: 1.25rem;
+}
+
+.advertising-client-heading > span {
+  color: var(--text-muted);
+  font-size: 0.8rem;
 }
 
 .page-heading,
@@ -2985,6 +3123,92 @@ header {
   background: rgba(56, 139, 253, 0.08);
 }
 
+.metrics-table td.projection-column.projection-better {
+  background: rgba(63, 185, 80, 0.14);
+  color: #7ee787;
+  font-weight: 700;
+  box-shadow: inset 3px 0 0 rgba(63, 185, 80, 0.62);
+}
+
+.metrics-table td.projection-column.projection-worse {
+  background: rgba(248, 81, 73, 0.14);
+  color: #ff7b72;
+  font-weight: 700;
+  box-shadow: inset 3px 0 0 rgba(248, 81, 73, 0.62);
+}
+
+.advertising-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 22px;
+}
+
+.advertising-table {
+  min-width: 820px;
+}
+
+.advertising-table .monthly-close-column {
+  border-left: 1px solid rgba(163, 113, 247, 0.48);
+  background: rgba(163, 113, 247, 0.09);
+}
+
+.advertising-table td.tacos-over-target {
+  background: rgba(248, 81, 73, 0.14);
+  color: #ff7b72;
+  font-weight: 700;
+}
+
+.advertising-table td.monthly-close-column.tacos-over-target {
+  background: rgba(248, 81, 73, 0.18);
+  box-shadow: inset 3px 0 0 rgba(248, 81, 73, 0.65);
+}
+
+.advertising-editor-modal {
+  width: min(960px, calc(100vw - 32px));
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+}
+
+.advertising-editor-wrap {
+  margin-top: 16px;
+  overflow-x: auto;
+}
+
+.advertising-editor-table {
+  width: 100%;
+  min-width: 790px;
+  border-collapse: collapse;
+}
+
+.advertising-editor-table th,
+.advertising-editor-table td {
+  padding: 8px;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 0.75rem;
+  text-align: left;
+}
+
+.advertising-editor-table th:not(:first-child) {
+  text-align: center;
+}
+
+.ad-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.ad-input-wrap span {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.ad-input-wrap .form-control {
+  min-width: 95px;
+  padding: 8px;
+}
+
 .projection-note,
 .form-hint {
   margin-top: 10px;
@@ -3119,12 +3343,12 @@ header {
 
 .weekly-historical-metrics {
   max-height: 75vh;
-  overflow: auto;
+  overflow-y: auto;
 }
 
-.weekly-historical-metrics table { min-width: 1050px; }
+.weekly-historical-metrics table { width: 100%; table-layout: fixed; }
 .weekly-historical-metrics th,
-.weekly-historical-metrics td { white-space: nowrap; }
+.weekly-historical-metrics td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .weekly-chart-empty {
   display: grid;
@@ -3379,7 +3603,8 @@ header {
 
 @media (max-width: 650px) {
   .clients-page,
-  .client-detail-page {
+  .client-detail-page,
+  .advertising-page {
     padding: 72px 16px 40px;
   }
 
@@ -3395,7 +3620,8 @@ header {
   }
 
   .client-info-grid,
-  .metrics-kpis {
+  .metrics-kpis,
+  .advertising-summary {
     grid-template-columns: 1fr;
   }
 
@@ -3428,6 +3654,29 @@ header {
   }
 
   .metrics-heading-actions { width: 100%; justify-content: flex-start; }
+
+  .advertising-toolbar {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .advertising-toolbar label {
+    width: auto;
+  }
+
+  .advertising-toolbar .btn {
+    width: 100%;
+  }
+
+  .advertising-client-options {
+    grid-template-columns: 1fr;
+  }
+
+  .advertising-picker-heading,
+  .advertising-client-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 
   .weekly-create-clients,
   .month-editor-totals { grid-template-columns: 1fr; }

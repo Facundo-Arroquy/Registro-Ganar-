@@ -7,6 +7,7 @@ export function renderSidebar({ state, currentUser, activePage, onRefresh }) {
     <a class="logo" href="/dashboard">WIM</a>
     <a class="nav-btn ${activePage === 'dashboard' ? 'active' : ''}" href="/dashboard">Dashboard</a>
     <a class="nav-btn ${activePage === 'clientes' ? 'active' : ''}" href="/clientes">Clientes</a>
+    <a class="nav-btn ${activePage === 'publicidad' ? 'active' : ''}" href="/publicidad">Publicidad</a>
 
     <a class="nav-btn ${activePage === 'tableros' ? 'active' : ''}" href="/tableros">Tableros</a>
     <a class="nav-btn ${activePage === 'calendarios' ? 'active' : ''}" href="/calendarios">Calendarios</a>
@@ -74,7 +75,7 @@ function initSidebarToggle() {
 function injectBackButton() {
   // Don't add where the page is home-like or already renders its own navigation.
   const page = document.body.dataset.page;
-  if (page === 'dashboard' || page === 'weekly' || page === 'clientes' || page === 'cliente') return;
+  if (page === 'dashboard' || page === 'weekly' || page === 'clientes' || page === 'cliente' || page === 'publicidad') return;
   if (document.querySelector('.btn-back')) return;
 
   const main = document.querySelector('main');

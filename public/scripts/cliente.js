@@ -16,11 +16,17 @@ const metricConfig = {
 let state;
 let detail;
 let selectedYear;
+let selectedAdvertisingYear;
+let selectedAdvertisingMonth;
 let metricsChart;
 
 async function boot() {
   [state, detail] = await Promise.all([loadAppState(), api(`/api/clients/${encodeURIComponent(clientId)}/detail`)]);
   selectedYear = availableYears()[0] || new Date().getFullYear();
+  selectedAdvertisingYear = advertisingYears()[0] || new Date().getFullYear();
+  selectedAdvertisingMonth = detail.advertisingMetrics?.length
+    ? Number(detail.advertisingMetrics[0].month)
+    : (detail.currentPeriodSummary?.month || new Date().getMonth() + 1);
   renderSidebar({ state, currentUser, activePage: 'clientes', onRefresh: refresh });
   renderPage();
 }
@@ -32,6 +38,10 @@ async function refresh() {
 
 function availableYears() {
   return [...new Set([new Date().getFullYear(), ...(detail?.metrics || []).map((item) => Number(item.year))])].sort((a, b) => b - a);
+}
+
+function advertisingYears() {
+  return [...new Set([new Date().getFullYear(), ...(detail?.advertisingMetrics || []).map((item) => Number(item.year))])].sort((a, b) => b - a);
 }
 
 function renderPage() {
@@ -66,6 +76,10 @@ function renderPage() {
       <div class="client-section-heading"><div><p class="eyebrow">Resultados</p><h2>Métricas históricas</h2></div><div class="metrics-heading-actions"><div class="metrics-year-tabs" id="metrics-year-tabs"></div><label class="metric-month-editor"><span>Mes</span><select class="form-control" id="edit-month-select">${monthNames.map((name, index) => `<option value="${index + 1}" ${index + 1 === (detail.currentPeriodSummary?.month || new Date().getMonth() + 1) ? 'selected' : ''}>${name}</option>`).join('')}</select></label><button class="btn btn-sm" type="button" id="edit-selected-month">Editar mes</button></div></div>
       <div id="metrics-content"></div>
     </section>
+    <section class="client-detail-section">
+      <div class="client-section-heading"><div><p class="eyebrow">Publicidad</p><h2>Rendimiento semanal</h2></div><div class="metrics-heading-actions"><div class="metrics-year-tabs" id="advertising-year-tabs"></div><label class="metric-month-editor"><span>Mes</span><select class="form-control" id="advertising-month-select">${monthNames.map((name, index) => `<option value="${index + 1}" ${index + 1 === selectedAdvertisingMonth ? 'selected' : ''}>${name}</option>`).join('')}</select></label><button class="btn btn-sm" type="button" id="edit-advertising-month">Editar publicidad</button></div></div>
+      <div id="advertising-content"></div>
+    </section>
     <div class="client-detail-columns">
       <section class="client-detail-section"><div class="client-section-heading"><div><p class="eyebrow">Seguimiento</p><h2>Comentarios de reuniones</h2></div></div>${renderCommentComposer()}${renderComments()}</section>
       <section class="client-detail-section"><div class="client-section-heading"><div><p class="eyebrow">Agenda</p><h2>Reuniones</h2></div></div>${renderMeetings()}</section>
@@ -74,10 +88,93 @@ function renderPage() {
   `;
   renderMetricYearTabs();
   renderMetrics();
+  renderAdvertisingYearTabs();
+  renderAdvertising();
   setupCommentActions();
   setupCredentialToggle();
   document.querySelector('#edit-client')?.addEventListener('click', openClientEditor);
   document.querySelector('#edit-selected-month')?.addEventListener('click', openMonthEditor);
+  document.querySelector('#advertising-month-select')?.addEventListener('change', (event) => {
+    selectedAdvertisingMonth = Number(event.target.value);
+    renderAdvertising();
+  });
+  document.querySelector('#edit-advertising-month')?.addEventListener('click', openAdvertisingEditor);
+}
+
+function renderAdvertisingYearTabs() {
+  const container = document.querySelector('#advertising-year-tabs');
+  container.innerHTML = advertisingYears().map((year) => `<button type="button" class="metric-year-btn ${year === selectedAdvertisingYear ? 'active' : ''}" data-advertising-year="${year}">${year}</button>`).join('');
+  container.querySelectorAll('[data-advertising-year]').forEach((button) => button.addEventListener('click', () => {
+    selectedAdvertisingYear = Number(button.dataset.advertisingYear);
+    renderAdvertisingYearTabs();
+    renderAdvertising();
+  }));
+}
+
+function advertisingWeeks() {
+  return Array.from({ length: 5 }, (_, index) => detail.advertisingMetrics?.find((item) => item.year === selectedAdvertisingYear && item.month === selectedAdvertisingMonth && item.week === index + 1)
+    || { week: index + 1, roas: null, tacos: null, dailyBudget: null, consumedBudget: null, targetTacos: null });
+}
+
+function averageFilled(weeks, key) {
+  const values = weeks.map((week) => week[key]).filter((value) => value !== null && value !== undefined);
+  return values.length ? values.reduce((sum, value) => sum + Number(value), 0) / values.length : null;
+}
+
+function renderAdvertising() {
+  const container = document.querySelector('#advertising-content');
+  const weeks = advertisingWeeks();
+  const hasData = weeks.some((week) => ['roas', 'tacos', 'dailyBudget', 'consumedBudget', 'targetTacos'].some((key) => week[key] !== null));
+  if (!hasData) {
+    container.innerHTML = '<div class="client-empty-state">Todavía no hay publicidad cargada para este mes. Usá “Editar publicidad” para comenzar.</div>';
+    return;
+  }
+  const totalDays = new Date(Date.UTC(selectedAdvertisingYear, selectedAdvertisingMonth, 0)).getUTCDate();
+  const realBudget = weeks.reduce((sum, week) => sum + Number(week.consumedBudget || 0), 0);
+  const dailyBudget = averageFilled(weeks, 'dailyBudget');
+  const projectedBudget = dailyBudget === null ? null : dailyBudget * totalDays;
+  const rows = [
+    { label: 'ROAS', key: 'roas', close: averageFilled(weeks, 'roas'), type: 'number' },
+    { label: 'TACOS', key: 'tacos', close: averageFilled(weeks, 'tacos'), type: 'percent', compareWithTarget: true },
+    { label: 'Presupuesto diario', key: 'dailyBudget', close: dailyBudget, type: 'money' },
+    { label: 'Presupuesto consumido', key: 'consumedBudget', close: realBudget, type: 'money' },
+    { label: 'TACOS objetivo', key: 'targetTacos', close: averageFilled(weeks, 'targetTacos'), type: 'percent' }
+  ];
+  const formatter = (value, type) => type === 'money' ? formatMetric(value, true) : type === 'percent' ? formatPercent(value) : formatDecimal(value);
+  const targetTacos = averageFilled(weeks, 'targetTacos');
+  const tacosCellClass = (tacos, target) => tacos !== null && tacos !== undefined && target !== null && target !== undefined && Number(tacos) > Number(target) ? ' tacos-over-target' : '';
+  container.innerHTML = `
+    <div class="advertising-summary"><div class="metric-kpi"><span>Presupuesto real</span><strong>${formatMetric(realBudget, true)}</strong><small>Consumido en las 5 semanas</small></div><div class="metric-kpi"><span>Presupuesto proyectado</span><strong>${formatMetric(projectedBudget, true)}</strong><small>Presupuesto diario promedio × ${totalDays} días</small></div><div class="metric-kpi"><span>TACOS objetivo</span><strong>${formatPercent(targetTacos)}</strong><small>Promedio objetivo mensual</small></div></div>
+    <div class="metrics-table-wrap"><table class="table metrics-table advertising-table"><thead><tr><th>Métrica</th>${weeks.map((week) => `<th>Semana ${week.week}</th>`).join('')}<th class="monthly-close-column">Cierre mensual</th></tr></thead><tbody>${rows.map((row) => `<tr><td><strong>${row.label}</strong></td>${weeks.map((week) => `<td class="${row.compareWithTarget ? tacosCellClass(week[row.key], week.targetTacos) : ''}">${formatter(week[row.key], row.type)}</td>`).join('')}<td class="monthly-close-column${row.compareWithTarget ? tacosCellClass(row.close, targetTacos) : ''}">${formatter(row.close, row.type)}</td></tr>`).join('')}<tr><td><strong>Presupuesto proyectado</strong></td>${weeks.map((week, index) => `<td>${formatMetric(week.dailyBudget === null ? null : Number(week.dailyBudget) * Math.max(0, Math.min(7, totalDays - index * 7)), true)}</td>`).join('')}<td class="monthly-close-column">${formatMetric(projectedBudget, true)}</td></tr></tbody></table></div>
+    <p class="projection-note">El cierre mensual es la sexta columna: suma el consumo real y proyecta el presupuesto diario promedio sobre los ${totalDays} días del mes.</p>`;
+}
+
+async function openAdvertisingEditor() {
+  const year = selectedAdvertisingYear;
+  const month = selectedAdvertisingMonth;
+  try {
+    const data = await api(`/api/clients/${encodeURIComponent(clientId)}/advertising/${year}/${month}`);
+    const fields = [
+      ['roas', 'ROAS', '0.01', ''], ['tacos', 'TACOS', '0.01', '%'],
+      ['dailyBudget', 'Presupuesto diario', '0.01', '$'], ['consumedBudget', 'Presupuesto consumido', '0.01', '$'],
+      ['targetTacos', 'TACOS objetivo', '0.01', '%']
+    ];
+    const overlay = openModal(`<div class="modal-overlay"><form class="modal advertising-editor-modal"><div class="modal-header">Publicidad · ${monthNames[month - 1]} ${year}</div><p class="form-hint">Dejá una celda vacía si esa semana todavía no tiene información.</p><div class="advertising-editor-wrap"><table class="advertising-editor-table"><thead><tr><th>Métrica</th>${data.weeks.map((week) => `<th>Semana ${week.week}</th>`).join('')}</tr></thead><tbody>${fields.map(([key, label, step, suffix]) => `<tr><td><strong>${label}</strong></td>${data.weeks.map((week) => `<td><div class="ad-input-wrap">${suffix === '$' ? '<span>$</span>' : ''}<input class="form-control" type="number" min="0" ${suffix === '%' ? 'max="100"' : ''} step="${step}" data-ad-field="${key}" data-week="${week.week}" value="${week[key] ?? ''}">${suffix === '%' ? '<span>%</span>' : ''}</div></td>`).join('')}</tr>`).join('')}</tbody></table></div><div class="modal-actions"><button class="btn btn-secondary" type="button" data-close-modal>Cancelar</button><button class="btn" type="submit">Guardar</button></div></form></div>`);
+    overlay.querySelector('form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const submit = overlay.querySelector('button[type="submit"]');
+      setButtonLoading(submit, true, 'Guardando...');
+      const weeks = data.weeks.map((week) => Object.fromEntries(fields.map(([key]) => {
+        const value = overlay.querySelector(`[data-ad-field="${key}"][data-week="${week.week}"]`).value;
+        return [key, value === '' ? null : Number(value)];
+      })));
+      try {
+        await api(`/api/clients/${encodeURIComponent(clientId)}/advertising/${year}/${month}`, { method: 'PUT', body: JSON.stringify({ weeks }) });
+        closeModal();
+        await reloadDetail();
+      } catch (error) { alert(error.message); setButtonLoading(submit, false); }
+    });
+  } catch (error) { alert(error.message); }
 }
 
 function settingOptions(collection, selected, emptyLabel = '') {
@@ -213,6 +310,20 @@ function metricValue(type, month) {
   return detail.metrics.find((item) => Number(item.year) === selectedYear && item.metricType === type && Number(item.month) === month)?.value ?? null;
 }
 
+function previousPeriodValue(type, year, month) {
+  const previousMonth = month === 1 ? 12 : month - 1;
+  const previousYear = month === 1 ? year - 1 : year;
+  return detail.metrics.find((item) => Number(item.year) === previousYear && item.metricType === type && Number(item.month) === previousMonth)?.value ?? null;
+}
+
+function projectionComparisonClass(estimated, previous) {
+  if (estimated === null || estimated === undefined || previous === null || previous === undefined) return '';
+  const difference = Number(estimated) - Number(previous);
+  const tolerance = Math.max(Math.abs(Number(previous)) * 0.001, 0.01);
+  if (Math.abs(difference) <= tolerance) return '';
+  return difference > 0 ? ' projection-better' : ' projection-worse';
+}
+
 function renderMetrics() {
   const container = document.querySelector('#metrics-content');
   if (!detail.metrics.length) {
@@ -221,6 +332,7 @@ function renderMetrics() {
   }
   const projection = detail.currentPeriodSummary;
   const showProjection = projection && selectedYear === projection.year;
+  const projectedValue = (type) => type === 'revenue' ? projection.estimatedRevenue : type === 'units' ? projection.estimatedUnits : projection.estimatedAsp;
   container.innerHTML = `
     <div class="metrics-kpis">${Object.entries(metricConfig).map(([type, config]) => {
       const values = monthNames.map((_, index) => metricValue(type, index + 1)).filter((value) => value !== null);
@@ -229,7 +341,7 @@ function renderMetrics() {
       return `<div class="metric-kpi"><span>${escapeHtml(config.label)} ${selectedYear}</span><strong>${formatMetric(total, config.money)}</strong><small>${values.length} ${values.length === 1 ? 'mes cargado' : 'meses cargados'}</small></div>`;
     }).join('')}</div>
     <div class="metrics-chart-wrap"><canvas id="client-metrics-chart"></canvas></div>
-    <div class="metrics-table-wrap"><table class="table metrics-table"><thead><tr><th>Métrica</th>${monthNames.map((month) => `<th>${month}</th>`).join('')}${showProjection ? `<th class="projection-column">Estimado ${monthNames[projection.month - 1]}</th>` : ''}</tr></thead><tbody>${Object.entries(metricConfig).map(([type, config]) => `<tr><td><strong>${escapeHtml(config.label)}</strong></td>${monthNames.map((_, index) => `<td>${formatMetric(metricValue(type, index + 1), config.money)}</td>`).join('')}${showProjection ? `<td class="projection-column">${formatMetric(type === 'revenue' ? projection.estimatedRevenue : type === 'units' ? projection.estimatedUnits : projection.estimatedAsp, config.money)}</td>` : ''}</tr>`).join('')}</tbody></table></div>
+    <div class="metrics-table-wrap"><table class="table metrics-table"><thead><tr><th>Métrica</th>${monthNames.map((month) => `<th>${month}</th>`).join('')}${showProjection ? `<th class="projection-column">Estimado ${monthNames[projection.month - 1]}</th>` : ''}</tr></thead><tbody>${Object.entries(metricConfig).map(([type, config]) => `<tr><td><strong>${escapeHtml(config.label)}</strong></td>${monthNames.map((_, index) => `<td>${formatMetric(metricValue(type, index + 1), config.money)}</td>`).join('')}${showProjection ? `<td class="projection-column${projectionComparisonClass(projectedValue(type), previousPeriodValue(type, projection.year, projection.month))}">${formatMetric(projectedValue(type), config.money)}</td>` : ''}</tr>`).join('')}</tbody></table></div>
     ${showProjection ? `<p class="projection-note">Proyección sobre ${projection.daysCovered} de ${projection.totalDays} días contemplados.</p>` : ''}
   `;
   drawMetricsChart();
@@ -384,6 +496,16 @@ function renderCards() {
 function formatMetric(value, money) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return '<span class="metric-empty">—</span>';
   return `${money ? '$ ' : ''}${Number(value).toLocaleString('es-AR', { maximumFractionDigits: 2 })}`;
+}
+
+function formatDecimal(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '<span class="metric-empty">—</span>';
+  return Number(value).toLocaleString('es-AR', { maximumFractionDigits: 2 });
+}
+
+function formatPercent(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '<span class="metric-empty">—</span>';
+  return `${Number(value).toLocaleString('es-AR', { maximumFractionDigits: 2 })} %`;
 }
 
 function formatPlainMetric(value, money) {
