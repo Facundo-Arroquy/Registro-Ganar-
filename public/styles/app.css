@@ -2255,6 +2255,16 @@ header {
   font-weight: bold;
 }
 
+.weekly-slide td.highlight-cell.estimated-up {
+  background-color: #d4edda;
+  color: #155724;
+}
+
+.weekly-slide td.highlight-cell.estimated-down {
+  background-color: #f8d7da;
+  color: #721c24;
+}
+
 /* Tags for consultor */
 .tag {
   padding: 3px 8px;
@@ -3333,12 +3343,12 @@ header {
 
 .weekly-historical-metrics {
   max-height: 75vh;
-  overflow: auto;
+  overflow-y: auto;
 }
 
-.weekly-historical-metrics table { min-width: 1050px; }
+.weekly-historical-metrics table { width: 100%; table-layout: fixed; }
 .weekly-historical-metrics th,
-.weekly-historical-metrics td { white-space: nowrap; }
+.weekly-historical-metrics td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .weekly-chart-empty {
   display: grid;

@@ -12,6 +12,7 @@ let report = null;
 let clientData = [];
 let clientSummaries = [];
 let calendarEvents = [];
+let snapshotClients = null;
 let selectedClientIds = new Set();
 let charts = [];
 
@@ -27,8 +28,13 @@ async function loadReport() {
   report = data.report;
   clientData = data.clientData || [];
   clientSummaries = data.clientSummaries || [];
+  snapshotClients = data.snapshotClients || null;
   const reportClientIds = new Set((report.meetings?.selectedClients || []).map(String));
   calendarEvents = (data.calendarEvents || []).filter((event) => reportClientIds.has(String(event.clientId)));
+  // If finalized with snapshot settings, use them for badge colors
+  if (report.status === 'final' && report.meetings?.snapshot?.settings) {
+    state.settings = report.meetings.snapshot.settings;
+  }
 }
 
 function initSelectedClients() {
@@ -48,7 +54,8 @@ function initSelectedClients() {
 }
 
 function getFilteredClients() {
-  return (state.clients || []).filter(c => selectedClientIds.has(c.id));
+  const clients = snapshotClients || state.clients || [];
+  return clients.filter(c => selectedClientIds.has(c.id));
 }
 
 function getClientSummary(clientId) {
@@ -314,6 +321,7 @@ function renderClientUpdateSlide(clients) {
               <th>Empresa</th>
               <th>Área</th>
               <th>Estado</th>
+              <th>Publicidad</th>
             </tr>
           </thead>
           <tbody>
@@ -323,6 +331,7 @@ function renderClientUpdateSlide(clients) {
                   <td><strong>${escapeHtml(c.company || c.name)}</strong></td>
                   <td>${renderConsultorTags(c)}</td>
                   <td>${renderConfiguredBadge('clientStatuses', c.status || 'Activo')}</td>
+                  <td>${c.adStatus ? renderConfiguredBadge('adStatuses', c.adStatus) : '<span class="metric-empty">—</span>'}</td>
                 </tr>
               `;
             }).join('')}
@@ -353,13 +362,30 @@ function renderClientPlanSlide(clients) {
   const metrics = ['revenue', 'units', 'asp'];
   const monthLabels = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
   const referenceSummary = clientSummaries.find((item) => Array.isArray(item.monthlyHistory));
-  const periods = referenceSummary?.monthlyHistory || [];
+  const allPeriods = referenceSummary?.monthlyHistory || [];
+  const periods = allPeriods.slice(-3);
   const estimatedLabel = referenceSummary ? `Estimado ${monthLabels[referenceSummary.month - 1]}` : 'Estimado';
   const metricValue = (summary, metric, period) => summary?.monthlyHistory?.find((item) => item.year === period.year && item.month === period.month)?.[metric] ?? null;
   const estimatedValue = (summary, metric) => metric === 'revenue' ? summary?.estimatedRevenue : metric === 'units' ? summary?.estimatedUnits : summary?.estimatedAsp;
   const formatValue = (value, metric) => value === null || value === undefined
     ? '<span class="metric-empty">—</span>'
     : `${metric === 'revenue' || metric === 'asp' ? '$ ' : ''}${Number(value).toLocaleString('es-AR', { maximumFractionDigits: 2 })}`;
+  // Compare estimated against the last *closed* month (exclude the current/estimated month)
+  const estMonth = referenceSummary?.month;
+  const estYear = referenceSummary?.year;
+  const closedPeriods = periods.filter((p) => !(p.year === estYear && p.month === estMonth));
+  const previousClosedPeriod = closedPeriods.length ? closedPeriods[closedPeriods.length - 1] : null;
+  const estimatedTrendClass = (summary, metric) => {
+    if (!previousClosedPeriod) return '';
+    const prev = metricValue(summary, metric, previousClosedPeriod);
+    const est = estimatedValue(summary, metric);
+    if (prev === null || prev === undefined || est === null || est === undefined) return '';
+    const p = Number(prev);
+    const e = Number(est);
+    if (e > p) return ' estimated-up';
+    if (e < p) return ' estimated-down';
+    return '';
+  };
 
   return `
     <div class="weekly-slide">
@@ -382,7 +408,7 @@ function renderClientPlanSlide(clients) {
                   ${mi === 0 ? `<td rowspan="3"><strong>${escapeHtml(c.company || c.name)}</strong>${renderWeeklyBreakdown(c.id)}</td>` : ''}
                   <td>${metricLabels[metric]}</td>
                   ${periods.map((period) => `<td>${formatValue(metricValue(summary, metric, period), metric)}</td>`).join('')}
-                  <td class="highlight-cell">${formatValue(estimatedValue(summary, metric), metric)}</td>
+                  <td class="highlight-cell${estimatedTrendClass(summary, metric)}">${formatValue(estimatedValue(summary, metric), metric)}</td>
                 </tr>
               `;
             }).join('')).join('')}
@@ -487,7 +513,7 @@ function renderClientStatusSlides(clients, editable) {
       const sourceComment = getClientSummary(c.id)?.lastComment;
       html += `
         <div class="weekly-slide">
-          <h2 class="weekly-slide-title">Estado Cliente | ${escapeHtml(c.company || c.name)} | ${escapeHtml(consultor)}</h2>
+          <h2 class="weekly-slide-title">Estado Cliente | ${escapeHtml(c.company || c.name)} | ${escapeHtml(consultor)} ${c.adStatus ? renderConfiguredBadge('adStatuses', c.adStatus) : ''}</h2>
           <div class="weekly-content-box weekly-client-status-grid">
             <div class="weekly-client-novedades">
               ${sourceComment ? `<div class="weekly-source-comment"><span>Último comentario de reunión</span><p>${escapeHtml(sourceComment.content)}</p><small>${escapeHtml(sourceComment.author_name || '')} · ${new Date(sourceComment.created_at).toLocaleDateString('es-AR')}</small></div>` : '<div class="weekly-source-comment empty"><span>Sin comentarios de reunión</span></div>'}
