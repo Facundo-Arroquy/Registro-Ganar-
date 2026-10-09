@@ -13,6 +13,7 @@ const hourHeight = 64;
 let state;
 let calendarData = { availability: [], availabilityExceptions: [], events: [] };
 let weekStart = mondayOf(new Date());
+let viewDays = 14;
 let selectedUsers = new Set();
 let calendarScrollInitialized = false;
 
@@ -28,18 +29,28 @@ async function boot() {
 
 async function refresh() {
   const from = dateString(weekStart);
-  const to = dateString(addDateDays(weekStart, 6));
+  const to = dateString(addDateDays(weekStart, viewDays - 1));
   calendarData = await api(`/api/calendar?from=${from}&to=${to}`);
   renderFilters();
   renderCalendar();
 }
 
 function bindPageActions() {
-  document.querySelector('#previous-week').onclick = async () => { weekStart = addDateDays(weekStart, -7); await refresh(); };
-  document.querySelector('#next-week').onclick = async () => { weekStart = addDateDays(weekStart, 7); await refresh(); };
+  document.querySelector('#previous-week').onclick = async () => { weekStart = addDateDays(weekStart, -viewDays); await refresh(); };
+  document.querySelector('#next-week').onclick = async () => { weekStart = addDateDays(weekStart, viewDays); await refresh(); };
   document.querySelector('#today-week').onclick = async () => { weekStart = mondayOf(new Date()); await refresh(); };
   document.querySelector('#new-event-btn').onclick = () => openEventModal();
   document.querySelector('#availability-btn').onclick = () => openAvailabilityModal();
+  document.querySelector('#view-1week').onclick = () => setViewDays(7);
+  document.querySelector('#view-2weeks').onclick = () => setViewDays(14);
+}
+
+async function setViewDays(days) {
+  viewDays = days;
+  document.querySelector('#view-1week').classList.toggle('active', days === 7);
+  document.querySelector('#view-2weeks').classList.toggle('active', days === 14);
+  calendarScrollInitialized = false;
+  await refresh();
 }
 
 function renderFilters() {
@@ -85,14 +96,15 @@ function saveFilter() {
 }
 
 function renderCalendar() {
-  const days = Array.from({ length: 7 }, (_, index) => addDateDays(weekStart, index));
-  const end = days[6];
+  const days = Array.from({ length: viewDays }, (_, index) => addDateDays(weekStart, index));
+  const end = days[days.length - 1];
   document.querySelector('#week-label').textContent = `${formatShortDate(weekStart)} — ${formatShortDate(end)}`;
   const calendar = document.querySelector('#week-calendar');
   calendar.style.setProperty('--calendar-hours', endHour - startHour);
+  calendar.style.setProperty('--calendar-days', viewDays);
   calendar.innerHTML = `
     <div class="calendar-corner"></div>
-    ${days.map((day, index) => `<div class="calendar-day-header ${dateString(day) === dateString(new Date()) ? 'today' : ''}"><span>${dayNames[index]}</span><strong>${day.getDate()}</strong></div>`).join('')}
+    ${days.map((day) => `<div class="calendar-day-header ${dateString(day) === dateString(new Date()) ? 'today' : ''}"><span>${dayNames[dayOfWeekIndex(day)]}</span><strong>${day.getDate()}</strong></div>`).join('')}
     <div class="calendar-hours">
       ${Array.from({ length: endHour - startHour + 1 }, (_, index) => `<span style="top:${index * hourHeight}px">${String(startHour + index).padStart(2, '0')}:00</span>`).join('')}
     </div>
@@ -116,7 +128,7 @@ function renderCalendar() {
 
 function renderDayColumn(day, column) {
   const date = dateString(day);
-  const weekday = column;
+  const weekday = dayOfWeekIndex(day) + 1;
   const availabilities = effectiveAvailability(date, weekday).filter((item) => selectedUsers.has(item.userId));
   const positionedAvailability = positionOverlappingAvailability(availabilities);
   const events = calendarData.events.filter((item) => argentinaDate(item.startsAt) === date && item.userIds.some((id) => selectedUsers.has(id)));
@@ -428,6 +440,7 @@ function timeToMinutes(time) {
   return hours * 60 + minutes;
 }
 
+function dayOfWeekIndex(date) { const day = date.getDay(); return day === 0 ? 6 : day - 1; }
 function userById(id) { return state.users.find((user) => user.id === id); }
 function userColor(id) { return userColors[Math.max(0, state.users.findIndex((user) => user.id === id)) % userColors.length]; }
 function mondayOf(value) { const date = new Date(value); date.setHours(12, 0, 0, 0); const weekday = date.getDay() || 7; date.setDate(date.getDate() - weekday + 1); return date; }

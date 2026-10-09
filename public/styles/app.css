@@ -1202,6 +1202,20 @@ header {
   text-transform: capitalize;
 }
 
+.calendar-view-toggle {
+  display: flex;
+  gap: 2px;
+  background: var(--bg-sidebar);
+  border-radius: var(--radius-sm);
+  padding: 2px;
+}
+.calendar-view-toggle .btn { border-radius: var(--radius-sm); }
+.calendar-view-toggle .btn.active {
+  background: var(--accent-blue);
+  color: #fff;
+  border-color: var(--accent-blue);
+}
+
 .calendar-user-filter {
   position: relative;
 }
@@ -1293,10 +1307,11 @@ header {
 
 .week-calendar {
   --calendar-hours: 15;
+  --calendar-days: 7;
   display: grid;
-  grid-template-columns: 64px repeat(7, minmax(175px, 1fr));
+  grid-template-columns: 64px repeat(var(--calendar-days), minmax(120px, 1fr));
   grid-template-rows: 58px calc(var(--calendar-hours) * 64px);
-  min-width: 1290px;
+  min-width: calc(64px + var(--calendar-days) * 120px);
 }
 
 .calendar-corner,
