@@ -54,7 +54,7 @@ function renderActiveBoard() {
 function renderColumn(board, column) {
   const cards = board.cards.filter((card) => (
     card.columnId === column.id
-    && (!selectedClientId || card.clientId === selectedClientId)
+    && (!selectedClientId || (card.clientIds || []).includes(selectedClientId) || card.clientId === selectedClientId)
   ));
   return `
     <section class="column" draggable="true" data-column-id="${escapeHtml(column.id)}">
@@ -76,7 +76,7 @@ function renderColumn(board, column) {
 
 function renderClientFilter(board) {
   const select = document.querySelector('#board-client-filter');
-  const clientIdsWithCards = new Set(board.cards.map((card) => card.clientId).filter(Boolean));
+  const clientIdsWithCards = new Set(board.cards.flatMap((card) => card.clientIds || (card.clientId ? [card.clientId] : [])));
   const clients = state.clients
     .filter((client) => clientIdsWithCards.has(client.id))
     .sort((a, b) => (a.company || a.name).localeCompare(b.company || b.name, 'es'));
@@ -85,7 +85,7 @@ function renderClientFilter(board) {
   select.innerHTML = `
     <option value="">Todos los clientes (${clients.length})</option>
     ${clients.map((client) => {
-      const cardCount = board.cards.filter((card) => card.clientId === client.id).length;
+      const cardCount = board.cards.filter((card) => (card.clientIds || []).includes(client.id) || card.clientId === client.id).length;
       return `<option value="${escapeHtml(client.id)}" ${client.id === selectedClientId ? 'selected' : ''}>${escapeHtml(client.company || client.name)} (${cardCount})</option>`;
     }).join('')}
   `;
@@ -96,12 +96,13 @@ function renderClientFilter(board) {
 }
 
 function renderCard(card) {
-  const client = state.clients.find((item) => item.id === card.clientId);
+  const cardClients = (card.clientIds || []).map((id) => state.clients.find((item) => item.id === id)).filter(Boolean);
+  if (!cardClients.length && card.clientId) { const fallback = state.clients.find((item) => item.id === card.clientId); if (fallback) cardClients.push(fallback); }
   const assignee = state.users.find((item) => item.id === card.assignedTo);
   const dueStatus = getDueDateStatus(card.dueDate, card.resolved);
   return `
     <article class="card" draggable="true" id="${escapeHtml(card.id)}" data-card-id="${escapeHtml(card.id)}">
-      ${client ? `<div class="client-badge">${escapeHtml(client.company)}</div>` : ''}
+      ${cardClients.length ? `<div class="client-badges">${cardClients.map((c) => `<div class="client-badge">${escapeHtml(c.company)}</div>`).join('')}</div>` : ''}
       <div class="card-title">${escapeHtml(card.title)}</div>
       ${card.description ? `<div class="card-description">${escapeHtml(card.description)}</div>` : ''}
       <div class="badges-container">
@@ -111,7 +112,7 @@ function renderCard(card) {
         ${renderCardTimer(card)}
       </div>
       <div class="card-meta">
-        <span>Cliente: ${client ? escapeHtml(client.name) : 'Sin asignar'}</span>
+        <span>${cardClients.length ? cardClients.map((c) => escapeHtml(c.name)).join(', ') : 'Sin cliente'}</span>
         <div>${assignee ? `<div class="avatar">${getInitials(assignee.name)}</div>` : '<span style="opacity:0.5;">-</span>'}</div>
       </div>
     </article>
@@ -280,9 +281,9 @@ function openCardModal(columnId, card = null) {
         <div class="modal-header">${isEdit ? 'Detalle de la Tarjeta' : 'Nueva Tarjeta'}</div>
         <div class="form-group"><label>Titulo</label><input type="text" id="card-title-input" class="form-control" value="${escapeHtml(card?.title || '')}"></div>
         <div class="form-group searchable-client-field">
-          <label for="card-client-search">Cliente</label>
-          <input type="search" id="card-client-search" class="form-control" autocomplete="off" placeholder="Escribí para buscar..." value="${escapeHtml(clientLabel(card?.clientId))}">
-          <input type="hidden" id="card-client-id" value="${escapeHtml(card?.clientId || '')}">
+          <label for="card-client-search">Clientes <span class="optional-label">(podés elegir más de uno)</span></label>
+          <div class="selected-clients-list" data-selected-clients></div>
+          <input type="search" id="card-client-search" class="form-control" autocomplete="off" placeholder="Escribí para buscar cliente...">
           <div class="client-search-results" data-client-results hidden></div>
         </div>
         <div class="form-group"><label>Descripcion</label><textarea id="card-desc-input" class="form-control" rows="3">${escapeHtml(card?.description || '')}</textarea></div>
@@ -317,7 +318,7 @@ function openCardModal(columnId, card = null) {
       </form>
     </div>
   `);
-  setupClientSearch(overlay, card?.clientId || '');
+  setupMultiClientSearch(overlay, card?.clientIds || (card?.clientId ? [card.clientId] : []));
   const recurrenceToggle = overlay.querySelector('#card-recurring-toggle');
   recurrenceToggle?.addEventListener('change', () => {
     overlay.querySelector('[data-recurrence-settings]').hidden = !recurrenceToggle.checked;
@@ -396,7 +397,7 @@ async function saveCard(columnId, card) {
   const payload = {
     columnId,
     title: document.querySelector('#card-title-input').value.trim(),
-    clientId: document.querySelector('#card-client-id').value,
+    clientIds: getSelectedClientIds(),
     description: document.querySelector('#card-desc-input').value.trim(),
     dueDate: document.querySelector('#card-due-input').value,
     assignedTo: document.querySelector('#card-assignee-select').value,
@@ -584,36 +585,51 @@ function openBoardSettings() {
   });
 }
 
-function clientLabel(selectedId = '') {
-  const client = state.clients.find((item) => item.id === selectedId);
-  return client ? `${client.company || client.name} — ${client.name}` : '';
+let _selectedClientIds = [];
+
+function getSelectedClientIds() {
+  return [..._selectedClientIds];
 }
 
-function setupClientSearch(overlay, selectedId = '') {
+function setupMultiClientSearch(overlay, initialIds = []) {
+  _selectedClientIds = [...initialIds];
   const search = overlay.querySelector('#card-client-search');
-  const hidden = overlay.querySelector('#card-client-id');
   const results = overlay.querySelector('[data-client-results]');
+  const listEl = overlay.querySelector('[data-selected-clients]');
+
+  const renderSelected = () => {
+    listEl.innerHTML = _selectedClientIds.map((id) => {
+      const client = state.clients.find((item) => item.id === id);
+      if (!client) return '';
+      return `<span class="selected-client-tag">${escapeHtml(client.company || client.name)} <button type="button" data-remove-client="${escapeHtml(id)}">&times;</button></span>`;
+    }).join('');
+    listEl.querySelectorAll('[data-remove-client]').forEach((btn) => btn.addEventListener('click', () => {
+      _selectedClientIds = _selectedClientIds.filter((id) => id !== btn.dataset.removeClient);
+      renderSelected();
+    }));
+  };
+
   const renderResults = () => {
     const term = search.value.trim().toLocaleLowerCase('es');
     const matches = state.clients
+      .filter((client) => !_selectedClientIds.includes(client.id))
       .filter((client) => !term || `${client.company} ${client.name}`.toLocaleLowerCase('es').includes(term))
       .slice(0, 10);
-    results.innerHTML = `<button type="button" data-client-id="">Sin cliente</button>${matches.map((client) => `<button type="button" data-client-id="${escapeHtml(client.id)}"><strong>${escapeHtml(client.company || client.name)}</strong><span>${escapeHtml(client.name)}</span></button>`).join('')}`;
+    results.innerHTML = matches.map((client) => `<button type="button" data-client-id="${escapeHtml(client.id)}"><strong>${escapeHtml(client.company || client.name)}</strong><span>${escapeHtml(client.name)}</span></button>`).join('') || '<span style="padding:8px;color:var(--text-muted);font-size:0.8rem;">Sin resultados</span>';
     results.hidden = false;
     results.querySelectorAll('[data-client-id]').forEach((button) => button.addEventListener('mousedown', (event) => {
       event.preventDefault();
-      hidden.value = button.dataset.clientId;
-      search.value = clientLabel(hidden.value);
+      _selectedClientIds.push(button.dataset.clientId);
+      search.value = '';
       results.hidden = true;
+      renderSelected();
     }));
   };
+
   search.addEventListener('focus', renderResults);
-  search.addEventListener('input', () => {
-    if (search.value !== clientLabel(hidden.value)) hidden.value = '';
-    renderResults();
-  });
+  search.addEventListener('input', renderResults);
   search.addEventListener('blur', () => setTimeout(() => { results.hidden = true; }, 100));
-  hidden.value = selectedId;
+  renderSelected();
 }
 
 function userOptions(selectedId = '') {

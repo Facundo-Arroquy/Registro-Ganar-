@@ -15,6 +15,7 @@ let calendarData = { availability: [], availabilityExceptions: [], events: [] };
 let weekStart = mondayOf(new Date());
 let viewDays = 14;
 let selectedUsers = new Set();
+let selectedDate = '';
 let calendarScrollInitialized = false;
 
 async function boot() {
@@ -36,13 +37,14 @@ async function refresh() {
 }
 
 function bindPageActions() {
-  document.querySelector('#previous-week').onclick = async () => { weekStart = addDateDays(weekStart, -viewDays); await refresh(); };
-  document.querySelector('#next-week').onclick = async () => { weekStart = addDateDays(weekStart, viewDays); await refresh(); };
-  document.querySelector('#today-week').onclick = async () => { weekStart = mondayOf(new Date()); await refresh(); };
+  document.querySelector('#previous-week').onclick = async () => { weekStart = addDateDays(weekStart, -viewDays); selectedDate = ''; await refresh(); };
+  document.querySelector('#next-week').onclick = async () => { weekStart = addDateDays(weekStart, viewDays); selectedDate = ''; await refresh(); };
+  document.querySelector('#today-week').onclick = async () => { weekStart = mondayOf(new Date()); selectedDate = ''; await refresh(); };
   document.querySelector('#new-event-btn').onclick = () => openEventModal();
   document.querySelector('#availability-btn').onclick = () => openAvailabilityModal();
   document.querySelector('#view-1week').onclick = () => setViewDays(7);
   document.querySelector('#view-2weeks').onclick = () => setViewDays(14);
+  document.querySelector('#events-panel-clear').onclick = () => { selectedDate = ''; document.querySelectorAll('.calendar-day-header').forEach((h) => h.classList.remove('selected')); renderEventsPanel(); };
 }
 
 async function setViewDays(days) {
@@ -117,13 +119,25 @@ function renderCalendar() {
     eventEl.addEventListener('click', (event) => {
       event.stopPropagation();
       const item = calendarData.events.find((entry) => entry.occurrenceKey === eventEl.dataset.eventKey);
-      if (item) openEventDetails(item);
+      if (item && !item.isMeetingEvent) openEventDetails(item);
+    });
+  });
+  calendar.querySelectorAll('.calendar-day-header').forEach((header) => {
+    header.style.cursor = 'pointer';
+    header.addEventListener('click', () => {
+      const index = [...calendar.querySelectorAll('.calendar-day-header')].indexOf(header);
+      const date = dateString(days[index]);
+      selectedDate = selectedDate === date ? '' : date;
+      calendar.querySelectorAll('.calendar-day-header').forEach((h) => h.classList.remove('selected'));
+      if (selectedDate) header.classList.add('selected');
+      renderEventsPanel();
     });
   });
   if (!calendarScrollInitialized) {
     document.querySelector('.calendar-scroll').scrollTop = 8 * hourHeight;
     calendarScrollInitialized = true;
   }
+  renderEventsPanel();
 }
 
 function renderDayColumn(day, column) {
@@ -166,12 +180,14 @@ function renderEvent(item) {
   const firstUser = visibleUsers[0] || item.userIds[0];
   const names = item.userIds.map((id) => userById(id)?.name).filter(Boolean).join(', ');
   const client = state.clients.find((entry) => entry.id === item.clientId);
+  const meetingClass = item.isMeetingEvent ? ' calendar-event-meeting' : '';
   return `
-    <button class="calendar-event" type="button" data-event-key="${escapeHtml(item.occurrenceKey)}" title="${escapeHtml(`${item.title} · ${local.time} · ${names}`)}" style="${blockStyle(local.time, item.durationMinutes)};${overlapStyle(item)};--user-color:${userColor(firstUser)}">
+    <button class="calendar-event${meetingClass}" type="button" data-event-key="${escapeHtml(item.occurrenceKey)}" title="${escapeHtml(`${item.title} · ${local.time} · ${names}`)}" style="${blockStyle(local.time, item.durationMinutes)};${overlapStyle(item)};--user-color:${userColor(firstUser)}">
+      ${item.isMeetingEvent ? '<i class="meeting-icon" aria-label="Reunion fija">📅</i>' : ''}
       <strong>${escapeHtml(item.title)}</strong>
       <span>${local.time} · ${item.durationMinutes} min</span>
       <small>${escapeHtml(names)}${client ? ` · ${escapeHtml(client.name)}` : ''}</small>
-      ${item.recurrenceUnit ? '<i aria-label="Evento recurrente">↻</i>' : ''}
+      ${item.recurrenceUnit && !item.isMeetingEvent ? '<i aria-label="Evento recurrente">↻</i>' : ''}
     </button>
   `;
 }
@@ -248,6 +264,50 @@ function overlapStyle(item) {
   if (lanes === 1) return '';
   const width = 100 / lanes;
   return `left:calc(${lane * width}% + 3px);right:auto;width:calc(${width}% - 5px)`;
+}
+
+function renderEventsPanel() {
+  const events = calendarData.events
+    .filter((item) => item.userIds.some((id) => selectedUsers.has(id)))
+    .filter((item) => !selectedDate || argentinaDate(item.startsAt) === selectedDate)
+    .sort((a, b) => new Date(a.startsAt) - new Date(b.startsAt));
+  const title = document.querySelector('#events-panel-title');
+  const clearBtn = document.querySelector('#events-panel-clear');
+  if (selectedDate) {
+    title.textContent = `Eventos del ${formatLongDate(selectedDate)}`;
+    clearBtn.hidden = false;
+  } else {
+    title.textContent = 'Eventos del periodo';
+    clearBtn.hidden = true;
+  }
+  const list = document.querySelector('#events-panel-list');
+  if (!events.length) {
+    list.innerHTML = '<p class="events-panel-empty">No hay eventos.</p>';
+    return;
+  }
+  list.innerHTML = events.map((item) => {
+    const local = argentinaParts(item.startsAt);
+    const names = item.userIds.map((id) => userById(id)?.name).filter(Boolean).join(', ');
+    const client = state.clients.find((entry) => entry.id === item.clientId);
+    const firstUser = item.userIds.find((id) => selectedUsers.has(id)) || item.userIds[0];
+    const panelMeetingClass = item.isMeetingEvent ? ' events-panel-item-meeting' : '';
+    return `
+      <button class="events-panel-item${panelMeetingClass}" type="button" data-panel-event="${escapeHtml(item.occurrenceKey)}" style="--user-color:${userColor(firstUser)}">
+        <div class="events-panel-item-date"><span>${dayNames[dayOfWeekIndex(new Date(local.date + 'T12:00:00'))]}</span><strong>${new Date(local.date + 'T12:00:00').getDate()}</strong></div>
+        <div class="events-panel-item-body">
+          <strong>${item.isMeetingEvent ? '📅 ' : ''}${escapeHtml(item.title)}</strong>
+          <span>${local.time} · ${item.durationMinutes} min</span>
+          <small>${escapeHtml(names)}${client ? ` · ${escapeHtml(client.name)}` : ''}</small>
+        </div>
+        ${item.recurrenceUnit && !item.isMeetingEvent ? '<i class="events-panel-recurrence" aria-label="Recurrente">↻</i>' : ''}
+      </button>`;
+  }).join('');
+  list.querySelectorAll('[data-panel-event]').forEach((el) => {
+    el.addEventListener('click', () => {
+      const item = calendarData.events.find((entry) => entry.occurrenceKey === el.dataset.panelEvent);
+      if (item && !item.isMeetingEvent) openEventDetails(item);
+    });
+  });
 }
 
 function openEventModal(prefill = {}) {

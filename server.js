@@ -259,6 +259,49 @@ function expandCalendarEvent(event, rangeStart, rangeEnd, users, exceptions) {
   return results;
 }
 
+function generateMeetingOccurrences(clients, ownerAssignments, rangeStart, rangeEnd) {
+  const results = [];
+  for (const client of clients) {
+    if (client.meeting_day === null || client.meeting_day === undefined || !client.meeting_time) continue;
+    const userIds = ownerAssignments.filter((item) => item.client_id === client.id).map((item) => item.user_id);
+    if (!userIds.length) continue;
+    const frequency = client.meeting_frequency || 7;
+    const meetingDayOfWeek = Number(client.meeting_day);
+    const time = String(client.meeting_time).slice(0, 5);
+    const title = client.company || client.name;
+    let date = rangeStart;
+    let firstOccurrence = null;
+    while (date <= rangeEnd) {
+      const jsDay = new Date(`${date}T12:00:00Z`).getUTCDay();
+      if (jsDay === meetingDayOfWeek) {
+        if (!firstOccurrence) firstOccurrence = date;
+        const weeksSinceFirst = daysBetween(firstOccurrence, date) / 7;
+        const matchesFrequency = frequency === 7 || (frequency === 15 && Math.round(weeksSinceFirst) % 2 === 0);
+        if (matchesFrequency) {
+          const startsAt = argentinaDateTime(date, time);
+          results.push({
+            id: `meeting_${client.id}`,
+            occurrenceKey: `meeting_${client.id}|${startsAt}`,
+            title,
+            clientId: client.id,
+            startsAt,
+            originalStartsAt: startsAt,
+            durationMinutes: 60,
+            notes: '',
+            recurrenceUnit: 'week',
+            recurrenceInterval: frequency === 15 ? 2 : 1,
+            recurrenceUntil: '',
+            userIds,
+            isMeetingEvent: true
+          });
+        }
+      }
+      date = addDays(date, 1);
+    }
+  }
+  return results;
+}
+
 function publicUser(user) {
   return { id: user.id, email: user.email, name: user.name };
 }
@@ -383,7 +426,7 @@ async function generateRecurringCardsThroughToday() {
 }
 
 async function getSupabaseState() {
-  const [users, statuses, consultors, complexities, adStatuses, auditRows, clients, consultorAssignments, boards, columns, cards, recurringTasks, recurringDays, clientLinks, generalLinks] = await Promise.all([
+  const [users, statuses, consultors, complexities, adStatuses, auditRows, clients, consultorAssignments, ownerAssignments, boards, columns, cards, cardClientAssignments, recurringTasks, recurringDays, clientLinks, generalLinks] = await Promise.all([
     supabaseRest('/app_users?select=id,email,name&order=name.asc'),
     getSupabaseStatuses(),
     getSupabaseConsultors(),
@@ -392,9 +435,11 @@ async function getSupabaseState() {
     supabaseRest('/settings_audit?select=action,user_id,user_name,created_at&order=created_at.desc&limit=50'),
     supabaseRest('/clients?select=id,name,company,email,owner_id,status_id,consultor_id,complexity_id,ad_status_id,meli_user,meli_password,vs_category,meeting_day,meeting_time,meeting_frequency,time_bank_seconds'),
     supabaseRest('/client_consultor_assignments?select=client_id,consultor_id'),
+    supabaseRest('/client_owner_assignments?select=client_id,user_id'),
     supabaseRest('/boards?select=id,name,color,position&order=position.asc'),
     supabaseRest('/board_columns?select=id,board_id,name,position&order=position.asc'),
     supabaseRest('/cards?select=id,board_id,column_id,client_id,title,description,due_date,resolved,created_by,assigned_to,timer_status,timer_elapsed_seconds,timer_started_at,recurring_task_id,occurrence_date'),
+    supabaseRest('/card_client_assignments?select=card_id,client_id'),
     supabaseRest('/recurring_tasks?select=id,board_id,title,start_date,end_date,active'),
     supabaseRest('/recurring_task_days?select=recurring_task_id,weekday,column_id'),
     supabaseRest('/client_links?select=id,client_id,url,label'),
@@ -406,12 +451,15 @@ async function getSupabaseState() {
   const adStatusMap = new Map(adStatuses.map((item) => [item.id, item]));
   return {
     users: users.map(publicUser),
-    clients: clients.map((client) => ({
+    clients: clients.map((client) => {
+      const clientOwnerIds = ownerAssignments.filter((item) => item.client_id === client.id).map((item) => item.user_id);
+      return {
       id: client.id,
       name: client.name,
       company: client.company,
       email: client.email || '',
-      ownerId: client.owner_id || '',
+      ownerId: clientOwnerIds[0] || client.owner_id || '',
+      ownerIds: clientOwnerIds.length ? clientOwnerIds : (client.owner_id ? [client.owner_id] : []),
       status: statusMap.get(client.status_id)?.name || 'Activo',
       consultors: consultorAssignments.filter((item) => item.client_id === client.id).map((item) => consultorMap.get(item.consultor_id)?.name).filter(Boolean),
       consultor: consultorAssignments.filter((item) => item.client_id === client.id).map((item) => consultorMap.get(item.consultor_id)?.name).filter(Boolean).join(', ') || consultorMap.get(client.consultor_id)?.name || '',
@@ -429,7 +477,7 @@ async function getSupabaseState() {
         url: link.url,
         label: link.label
       }))
-    })),
+    };}),
     boards: boards.map((board) => ({
       id: board.id,
       name: board.name,
@@ -438,10 +486,13 @@ async function getSupabaseState() {
         id: column.id,
         name: column.name
       })),
-      cards: cards.filter((card) => card.board_id === board.id).map((card) => ({
+      cards: cards.filter((card) => card.board_id === board.id).map((card) => {
+        const cardClients = cardClientAssignments.filter((item) => item.card_id === card.id).map((item) => item.client_id);
+        return {
         id: card.id,
         columnId: card.column_id,
-        clientId: card.client_id || '',
+        clientId: cardClients[0] || card.client_id || '',
+        clientIds: cardClients.length ? cardClients : (card.client_id ? [card.client_id] : []),
         title: card.title,
         description: card.description || '',
         dueDate: card.due_date || '',
@@ -453,7 +504,7 @@ async function getSupabaseState() {
         timerStatus: card.timer_status,
         timerElapsedSeconds: Number(card.timer_elapsed_seconds || 0),
         timerStartedAt: card.timer_started_at ? new Date(card.timer_started_at).getTime() : null
-      }))
+      };})
     })),
     recurringTasks: recurringTasks.map((task) => ({
       id: task.id,
@@ -531,6 +582,24 @@ async function replaceClientConsultors(clientId, consultorIds) {
   await supabaseRest('/client_consultor_assignments', {
     method: 'POST',
     body: JSON.stringify(consultorIds.map((consultorId) => ({ client_id: clientId, consultor_id: consultorId })))
+  });
+}
+
+async function replaceClientOwners(clientId, userIds) {
+  await supabaseRest(`/client_owner_assignments?client_id=eq.${encodeURIComponent(clientId)}`, { method: 'DELETE' });
+  if (!userIds.length) return;
+  await supabaseRest('/client_owner_assignments', {
+    method: 'POST',
+    body: JSON.stringify(userIds.map((userId) => ({ client_id: clientId, user_id: userId })))
+  });
+}
+
+async function replaceCardClients(cardId, clientIds) {
+  await supabaseRest(`/card_client_assignments?card_id=eq.${encodeURIComponent(cardId)}`, { method: 'DELETE' });
+  if (!clientIds.length) return;
+  await supabaseRest('/card_client_assignments', {
+    method: 'POST',
+    body: JSON.stringify(clientIds.map((clientId) => ({ card_id: cardId, client_id: clientId })))
   });
 }
 
@@ -694,18 +763,21 @@ async function getSupabaseSettings() {
 }
 
 async function getSupabaseClient(clientId) {
-  const [[client], assignments] = await Promise.all([
+  const [[client], assignments, ownerRows] = await Promise.all([
     supabaseRest(`/clients?select=id,name,company,email,owner_id,meeting_day,meeting_time,meeting_frequency,time_bank_seconds,complexity_id,ad_status_id,meli_user,meli_password,vs_category,status:client_statuses(name),consultor:client_consultors!clients_consultor_id_fkey(name),complexity:complexities(name),ad_status:ad_statuses(name)&id=eq.${encodeURIComponent(clientId)}&limit=1`),
-    supabaseRest(`/client_consultor_assignments?select=consultor:client_consultors(name)&client_id=eq.${encodeURIComponent(clientId)}`)
+    supabaseRest(`/client_consultor_assignments?select=consultor:client_consultors(name)&client_id=eq.${encodeURIComponent(clientId)}`),
+    supabaseRest(`/client_owner_assignments?select=user_id&client_id=eq.${encodeURIComponent(clientId)}`)
   ]);
   if (!client) return null;
   const consultors = assignments.map((item) => item.consultor?.name).filter(Boolean);
+  const ownerIds = ownerRows.map((item) => item.user_id);
   return {
     id: client.id,
     name: client.name,
     company: client.company,
     email: client.email || '',
-    ownerId: client.owner_id || '',
+    ownerId: ownerIds[0] || client.owner_id || '',
+    ownerIds: ownerIds.length ? ownerIds : (client.owner_id ? [client.owner_id] : []),
     status: client.status?.name || 'Activo',
     consultors,
     consultor: consultors.join(', ') || client.consultor?.name || '',
@@ -729,15 +801,23 @@ async function getSupabaseBoard(boardId) {
     supabaseRest(`/cards?select=id,column_id,client_id,title,description,due_date,resolved,created_by,assigned_to,timer_status,timer_elapsed_seconds,timer_started_at,recurring_task_id,occurrence_date&board_id=eq.${encodedId}`)
   ]);
   if (!board) return null;
+  let boardCardClientAssignments = [];
+  if (cards.length) {
+    const cardIds = cards.map((c) => `"${c.id.replaceAll('"', '')}"`).join(',');
+    boardCardClientAssignments = await supabaseRest(`/card_client_assignments?select=card_id,client_id&card_id=in.(${encodeURIComponent(cardIds)})`);
+  }
   return {
     id: board.id,
     name: board.name,
     color: board.color,
     columns: columns.map((column) => ({ id: column.id, name: column.name })),
-    cards: cards.map((card) => ({
+    cards: cards.map((card) => {
+      const cardClients = boardCardClientAssignments.filter((item) => item.card_id === card.id).map((item) => item.client_id);
+      return {
       id: card.id,
       columnId: card.column_id,
-      clientId: card.client_id || '',
+      clientId: cardClients[0] || card.client_id || '',
+      clientIds: cardClients.length ? cardClients : (card.client_id ? [card.client_id] : []),
       title: card.title,
       description: card.description || '',
       dueDate: card.due_date || '',
@@ -749,7 +829,7 @@ async function getSupabaseBoard(boardId) {
       timerStatus: card.timer_status,
       timerElapsedSeconds: Number(card.timer_elapsed_seconds || 0),
       timerStartedAt: card.timer_started_at ? new Date(card.timer_started_at).getTime() : null
-    }))
+    };})
   };
 }
 
@@ -973,14 +1053,18 @@ async function handleApi(req, res, url) {
     if (!isDateString(rangeStart) || !isDateString(rangeEnd) || rangeEnd < rangeStart || daysBetween(rangeStart, rangeEnd) > 62) {
       return sendError(res, 400, 'Rango de calendario invalido');
     }
-    const [availability, availabilityExceptions, events, eventUsers, eventExceptions] = await Promise.all([
+    const [availability, availabilityExceptions, events, eventUsers, eventExceptions, meetingClients, meetingOwnerAssignments] = await Promise.all([
       supabaseRest('/calendar_availability?select=id,user_id,weekday,start_time,end_time,valid_from,valid_to&order=start_time.asc'),
       supabaseRest(`/calendar_availability_exceptions?select=id,user_id,exception_date,start_time,end_time,unavailable,note&exception_date=gte.${rangeStart}&exception_date=lte.${rangeEnd}`),
       supabaseRest('/calendar_events?select=id,title,client_id,starts_at,duration_minutes,notes,recurrence_unit,recurrence_interval,recurrence_until'),
       supabaseRest('/calendar_event_users?select=event_id,user_id'),
-      supabaseRest('/calendar_event_exceptions?select=id,event_id,occurrence_starts_at,replacement_starts_at,replacement_duration_minutes,cancelled')
+      supabaseRest('/calendar_event_exceptions?select=id,event_id,occurrence_starts_at,replacement_starts_at,replacement_duration_minutes,cancelled'),
+      supabaseRest('/clients?select=id,name,company,meeting_day,meeting_time,meeting_frequency&meeting_day=not.is.null&meeting_time=not.is.null'),
+      supabaseRest('/client_owner_assignments?select=client_id,user_id')
     ]);
     const occurrences = events.flatMap((event) => expandCalendarEvent(event, rangeStart, rangeEnd, eventUsers, eventExceptions));
+    const meetingEvents = generateMeetingOccurrences(meetingClients, meetingOwnerAssignments, rangeStart, rangeEnd);
+    const allEvents = [...occurrences, ...meetingEvents];
     return sendJson(res, 200, {
       availability: availability.map((item) => ({
         id: item.id,
@@ -1000,7 +1084,7 @@ async function handleApi(req, res, url) {
         unavailable: item.unavailable,
         note: item.note || ''
       })),
-      events: occurrences.sort((a, b) => a.startsAt.localeCompare(b.startsAt))
+      events: allEvents.sort((a, b) => a.startsAt.localeCompare(b.startsAt))
     });
   }
 
@@ -1414,12 +1498,14 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === 'POST' && url.pathname === '/api/clients') {
+    const rawOwnerIds = Array.isArray(body.ownerIds) ? body.ownerIds.map(String).filter(Boolean) : [];
     const client = {
       id: makeId('cl'),
       name: String(body.name || '').trim(),
       company: String(body.company || '').trim(),
       email: String(body.email || '').trim(),
-      ownerId: String(body.ownerId || ''),
+      ownerId: rawOwnerIds[0] || String(body.ownerId || ''),
+      ownerIds: rawOwnerIds.length ? rawOwnerIds : (body.ownerId ? [String(body.ownerId)] : []),
       status: String(body.status || 'Activo').trim(),
       consultors: normalizeConsultorNames(body.consultors, normalizeConsultorNames(body.consultor)),
       complexity: String(body.complexity || '').trim(),
@@ -1459,7 +1545,10 @@ async function handleApi(req, res, url) {
         meeting_frequency: client.meetingFrequency
       }])
     });
-    await replaceClientConsultors(createdClient.id, consultorIds);
+    await Promise.all([
+      replaceClientConsultors(createdClient.id, consultorIds),
+      replaceClientOwners(createdClient.id, client.ownerIds)
+    ]);
     recordAuditInBackground(body, `Creo el cliente "${client.name}"`);
     return sendJson(res, 201, { client: { ...client, consultor: client.consultors.join(', '), id: createdClient.id } });
   }
@@ -1677,11 +1766,13 @@ async function handleApi(req, res, url) {
     }
 
     if (req.method === 'PATCH' && segments.length === 3) {
+      const patchOwnerIds = Array.isArray(body.ownerIds) ? body.ownerIds.map(String).filter(Boolean) : null;
       const payload = {
         name: body.name === undefined ? client.name : String(body.name).trim(),
         company: body.company === undefined ? client.company : String(body.company).trim(),
         email: body.email === undefined ? client.email : String(body.email).trim(),
-        ownerId: body.ownerId === undefined ? client.ownerId || '' : String(body.ownerId),
+        ownerId: patchOwnerIds ? (patchOwnerIds[0] || '') : (body.ownerId === undefined ? client.ownerId || '' : String(body.ownerId)),
+        ownerIds: patchOwnerIds || client.ownerIds || (client.ownerId ? [client.ownerId] : []),
         status: body.status === undefined ? client.status || 'Activo' : String(body.status || 'Activo').trim(),
         consultors: normalizeConsultorNames(body.consultors, client.consultors || normalizeConsultorNames(client.consultor)),
         complexity: body.complexity === undefined ? client.complexity || '' : String(body.complexity || '').trim(),
@@ -1720,7 +1811,10 @@ async function handleApi(req, res, url) {
           meeting_frequency: payload.meetingFrequency
         })
       });
-      await replaceClientConsultors(client.id, consultorIds);
+      await Promise.all([
+        replaceClientConsultors(client.id, consultorIds),
+        replaceClientOwners(client.id, payload.ownerIds)
+      ]);
       recordAuditInBackground(body, `Modifico el cliente "${client.name}"`);
       return sendJson(res, 200, { client: { id: client.id, ...payload, consultor: payload.consultors.join(', ') } });
     }
@@ -1965,10 +2059,12 @@ async function handleApi(req, res, url) {
     if (req.method === 'POST' && segments[3] === 'cards' && segments.length === 4) {
       const title = String(body.title || '').trim();
       if (!title) return sendError(res, 400, 'El titulo es obligatorio');
+      const rawClientIds = Array.isArray(body.clientIds) ? body.clientIds.map(String).filter(Boolean) : [];
       const card = {
         id: makeId('k'),
         columnId: String(body.columnId || ''),
-        clientId: String(body.clientId || ''),
+        clientId: rawClientIds[0] || String(body.clientId || ''),
+        clientIds: rawClientIds.length ? rawClientIds : (body.clientId ? [String(body.clientId)] : []),
         title,
         description: String(body.description || '').trim(),
         dueDate: String(body.dueDate || ''),
@@ -1996,6 +2092,7 @@ async function handleApi(req, res, url) {
           assigned_to: card.assignedTo || null
         }])
       });
+      await replaceCardClients(card.id, card.clientIds);
       board.cards.push(card);
       recordAuditInBackground(body, `Creo la tarjeta "${title}" en "${board.name}"`);
       return sendJson(res, 201, { card, board });
@@ -2006,9 +2103,11 @@ async function handleApi(req, res, url) {
       if (!card) return sendError(res, 404, 'Tarjeta no encontrada');
       const previousColumnId = card.columnId;
       const previousTitle = card.title;
+      const patchClientIds = Array.isArray(body.clientIds) ? body.clientIds.map(String).filter(Boolean) : null;
       Object.assign(card, {
         title: body.title === undefined ? card.title : String(body.title).trim(),
-        clientId: body.clientId === undefined ? card.clientId : String(body.clientId),
+        clientId: patchClientIds ? (patchClientIds[0] || '') : (body.clientId === undefined ? card.clientId : String(body.clientId)),
+        clientIds: patchClientIds || card.clientIds || (card.clientId ? [card.clientId] : []),
         description: body.description === undefined ? card.description : String(body.description).trim(),
         dueDate: body.dueDate === undefined ? card.dueDate : String(body.dueDate),
         resolved: body.resolved === undefined ? card.resolved : Boolean(body.resolved),
@@ -2030,6 +2129,7 @@ async function handleApi(req, res, url) {
           assigned_to: card.assignedTo || null
         })
       });
+      if (patchClientIds) await replaceCardClients(card.id, card.clientIds);
       if (previousColumnId !== card.columnId) {
         const fromColumn = board.columns.find((column) => column.id === previousColumnId);
         const toColumn = board.columns.find((column) => column.id === card.columnId);
