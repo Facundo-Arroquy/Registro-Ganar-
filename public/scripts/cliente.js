@@ -46,7 +46,8 @@ function advertisingYears() {
 
 function renderPage() {
   const client = detail.client;
-  const owner = state.users.find((user) => user.id === client.ownerId);
+  const ownerIds = client.ownerIds || (client.ownerId ? [client.ownerId] : []);
+  const ownerNames = ownerIds.map((id) => state.users.find((user) => user.id === id)?.name).filter(Boolean);
   document.title = `${client.company || client.name} | WIM`;
   document.querySelector('#client-detail').innerHTML = `
     <a class="client-detail-back" href="/clientes">&larr; Todos los clientes</a>
@@ -61,7 +62,7 @@ function renderPage() {
     <section class="client-info-grid">
       ${infoItem('Contacto', client.name || '-')}
       ${infoItem('Correo', client.email || '-')}
-      ${infoItem('Responsable', owner?.name || 'Sin asignar')}
+      ${infoItem('Responsable', ownerNames.length ? ownerNames.join(', ') : 'Sin asignar')}
       ${infoHtmlItem('Consultores', renderConsultorBadges(client.consultors || (client.consultor ? [client.consultor] : [])))}
       ${client.complexity ? infoHtmlItem('Complejidad', renderConfiguredBadge('complexities', client.complexity)) : infoItem('Complejidad', 'Sin definir')}
       ${client.adStatus ? infoHtmlItem('Publicidad', renderConfiguredBadge('adStatuses', client.adStatus)) : infoItem('Publicidad', 'Sin definir')}
@@ -182,8 +183,9 @@ function settingOptions(collection, selected, emptyLabel = '') {
   return `${emptyLabel ? `<option value="">${escapeHtml(emptyLabel)}</option>` : ''}${options.map((name) => `<option value="${escapeHtml(name)}" ${name === selected ? 'selected' : ''}>${escapeHtml(name)}</option>`).join('')}`;
 }
 
-function ownerOptions(selected) {
-  return `<option value="">Sin responsable</option>${state.users.map((user) => `<option value="${escapeHtml(user.id)}" ${user.id === selected ? 'selected' : ''}>${escapeHtml(user.name)}</option>`).join('')}`;
+function ownerCheckboxes(selected = []) {
+  const selectedIds = new Set(selected);
+  return state.users.map((user) => `<label><input type="checkbox" value="${escapeHtml(user.id)}" ${selectedIds.has(user.id) ? 'checked' : ''}><span>${escapeHtml(user.name)}</span></label>`).join('');
 }
 
 function openClientEditor() {
@@ -195,7 +197,7 @@ function openClientEditor() {
         <div class="form-group"><label for="detail-client-name">Nombre del contacto</label><input class="form-control" id="detail-client-name" value="${escapeHtml(client.name || '')}" required></div>
         <div class="form-group"><label for="detail-client-company">Empresa</label><input class="form-control" id="detail-client-company" value="${escapeHtml(client.company || '')}" required></div>
         <div class="form-group"><label for="detail-client-email">Correos electrónicos <span class="optional-label">(uno por línea)</span></label><textarea class="form-control" id="detail-client-email" rows="2">${escapeHtml(client.email || '')}</textarea></div>
-        <div class="form-group"><label for="detail-client-owner">Responsable</label><select class="form-control" id="detail-client-owner">${ownerOptions(client.ownerId || '')}</select></div>
+        <div class="form-group"><label>Responsables <span class="optional-label">(podés elegir más de uno)</span></label><div class="multi-tag-options" id="detail-client-owners">${ownerCheckboxes(client.ownerIds || (client.ownerId ? [client.ownerId] : []))}</div></div>
         <div class="form-group"><label>Consultores <span class="optional-label">(podés elegir más de uno)</span></label><div class="multi-tag-options" id="detail-client-consultors">${consultorCheckboxes(client.consultors || (client.consultor ? [client.consultor] : []))}</div></div>
         <div class="form-group"><label for="detail-client-status">Estado</label><select class="form-control" id="detail-client-status">${settingOptions('clientStatuses', client.status)}</select></div>
         <div class="form-group"><label for="detail-client-complexity">Complejidad</label><select class="form-control" id="detail-client-complexity">${settingOptions('complexities', client.complexity, 'Sin definir')}</select></div>
@@ -216,7 +218,7 @@ function openClientEditor() {
       name: overlay.querySelector('#detail-client-name').value.trim(),
       company: overlay.querySelector('#detail-client-company').value.trim(),
       email: overlay.querySelector('#detail-client-email').value.trim(),
-      ownerId: overlay.querySelector('#detail-client-owner').value,
+      ownerIds: [...overlay.querySelectorAll('#detail-client-owners input:checked')].map((input) => input.value),
       consultors: [...overlay.querySelectorAll('#detail-client-consultors input:checked')].map((input) => input.value),
       status: overlay.querySelector('#detail-client-status').value,
       complexity: overlay.querySelector('#detail-client-complexity').value,

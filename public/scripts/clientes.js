@@ -6,6 +6,7 @@ import { escapeHtml, formatBankDuration, getInitials } from './utils.js';
 const currentUser = requireSession();
 let state;
 let searchTerm = '';
+let selectedOwnerId = '';
 const selectedStatuses = new Set();
 
 async function boot() {
@@ -15,21 +16,43 @@ async function boot() {
     searchTerm = event.target.value.trim().toLocaleLowerCase('es');
     renderClients();
   });
+  renderOwnerFilter();
+  document.querySelector('#clients-owner-filter').addEventListener('change', (event) => {
+    selectedOwnerId = event.target.value;
+    renderSummary();
+    renderClients();
+  });
   renderSummary();
   renderClients();
 }
 
 async function refresh() {
   state = await refreshAppState();
+  renderOwnerFilter();
   renderSummary();
   renderClients();
 }
 
+function renderOwnerFilter() {
+  const select = document.querySelector('#clients-owner-filter');
+  const usersWithClients = state.users.filter((user) => state.clients.some((client) => (client.ownerIds || []).includes(user.id) || client.ownerId === user.id));
+  select.innerHTML = `
+    <option value="">Todos los responsables</option>
+    ${usersWithClients.map((user) => `<option value="${escapeHtml(user.id)}" ${selectedOwnerId === user.id ? 'selected' : ''}>${escapeHtml(user.name || user.email)}</option>`).join('')}
+  `;
+}
+
+function getFilteredByOwner() {
+  if (!selectedOwnerId) return state.clients;
+  return state.clients.filter((client) => (client.ownerIds || []).includes(selectedOwnerId) || client.ownerId === selectedOwnerId);
+}
+
 function renderSummary() {
+  const ownerFiltered = getFilteredByOwner();
   const counts = new Map();
-  state.clients.forEach((client) => counts.set(client.status || 'Sin estado', (counts.get(client.status || 'Sin estado') || 0) + 1));
+  ownerFiltered.forEach((client) => counts.set(client.status || 'Sin estado', (counts.get(client.status || 'Sin estado') || 0) + 1));
   document.querySelector('#clients-summary').innerHTML = `
-    <button type="button" class="client-summary-card ${selectedStatuses.size === 0 ? 'active' : ''}" data-status-filter="" aria-pressed="${selectedStatuses.size === 0}"><span>Total</span><strong>${state.clients.length}</strong></button>
+    <button type="button" class="client-summary-card ${selectedStatuses.size === 0 ? 'active' : ''}" data-status-filter="" aria-pressed="${selectedStatuses.size === 0}"><span>Total</span><strong>${ownerFiltered.length}</strong></button>
     ${[...counts.entries()].sort(([a], [b]) => a.localeCompare(b, 'es')).map(([status, count]) => `
       <button type="button" class="client-summary-card status-filter-card ${selectedStatuses.has(status) ? 'active' : ''}" style="--status-color: ${escapeHtml(getSettingColor('clientStatuses', status))}" data-status-filter="${escapeHtml(status)}" aria-pressed="${selectedStatuses.has(status)}"><span>${escapeHtml(status)}</span><strong>${count}</strong></button>
     `).join('')}
@@ -45,7 +68,7 @@ function renderSummary() {
 }
 
 function renderClients() {
-  const clients = state.clients.filter((client) => (
+  const clients = getFilteredByOwner().filter((client) => (
     (selectedStatuses.size === 0 || selectedStatuses.has(client.status || 'Sin estado'))
     && [client.company, client.name, client.consultor, client.status]
       .some((value) => String(value || '').toLocaleLowerCase('es').includes(searchTerm))
@@ -53,7 +76,8 @@ function renderClients() {
     .sort((a, b) => (a.company || a.name).localeCompare(b.company || b.name, 'es'));
   const ownerById = new Map(state.users.map((user) => [user.id, user]));
   document.querySelector('#clients-directory').innerHTML = clients.length ? clients.map((client) => {
-    const owner = ownerById.get(client.ownerId);
+    const ownerNames = (client.ownerIds || []).map((id) => ownerById.get(id)?.name).filter(Boolean);
+    if (!ownerNames.length && client.ownerId) { const fallback = ownerById.get(client.ownerId)?.name; if (fallback) ownerNames.push(fallback); }
     return `
       <a class="client-directory-card" href="/cliente?id=${encodeURIComponent(client.id)}">
         <div class="client-card-avatar">${escapeHtml(getInitials(client.company || client.name))}</div>
@@ -62,7 +86,7 @@ function renderClients() {
           <p>${escapeHtml(client.name || 'Sin contacto')}</p>
           <div class="client-card-meta">
             <span>${escapeHtml(client.consultor || 'Sin consultor')}</span>
-            <span>${escapeHtml(owner?.name || 'Sin responsable')}</span>
+            <span>${escapeHtml(ownerNames.length ? ownerNames.join(', ') : 'Sin responsable')}</span>
             <span>${escapeHtml(client.email || 'Sin correo')}</span>
             <span>Banco: ${escapeHtml(formatBankDuration(client.timeBankSeconds))}</span>
           </div>

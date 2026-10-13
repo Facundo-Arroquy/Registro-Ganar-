@@ -33,6 +33,10 @@
           <button class="btn btn-secondary btn-sm" type="button" id="next-week" aria-label="Semana siguiente">&rarr;</button>
           <strong id="week-label"></strong>
         </div>
+        <div class="calendar-view-toggle">
+          <button class="btn btn-secondary btn-sm" type="button" id="view-1week">1 semana</button>
+          <button class="btn btn-sm active" type="button" id="view-2weeks">2 semanas</button>
+        </div>
         <details class="calendar-user-filter">
           <summary id="user-filter-label">Usuarios</summary>
           <div class="calendar-filter-menu" id="user-filter-menu"></div>
@@ -43,6 +47,13 @@
       <div class="calendar-scroll">
         <div class="week-calendar" id="week-calendar" aria-live="polite"></div>
       </div>
+      <section class="calendar-events-panel" id="events-panel">
+        <div class="events-panel-header">
+          <h2 id="events-panel-title">Eventos del periodo</h2>
+          <button class="btn btn-secondary btn-sm" type="button" id="events-panel-clear" hidden>Ver todos</button>
+        </div>
+        <div class="events-panel-list" id="events-panel-list"></div>
+      </section>
     </div>
   </main>
   <div id="modal-root"></div>
