@@ -35,6 +35,7 @@ function renderPage() {
     },
     onRefresh: refresh
   });
+  document.querySelector('[data-open-recurring]').onclick = openRecurringTasksPanel;
   document.querySelector('[data-open-column]').onclick = openColumnModal;
   document.querySelector('[data-open-settings]').onclick = openBoardSettings;
   renderActiveBoard();
@@ -524,6 +525,196 @@ async function deleteColumn(columnId, button) {
     setButtonLoading(button, false);
     alert(error.message);
   }
+}
+
+function openRecurringTasksPanel() {
+  const board = getActiveBoard(state);
+  const dayLabels = ['', 'Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab', 'Dom'];
+  const tasks = (state.recurringTasks || []).filter((t) => t.boardId === board.id);
+  const rows = tasks.map((task) => {
+    const client = task.clientId ? state.clients.find((c) => c.id === task.clientId) : null;
+    const assignee = task.assignedTo ? state.users.find((u) => u.id === task.assignedTo) : null;
+    const daysStr = task.days.map((d) => dayLabels[d.weekday] || '?').join(', ') || '-';
+    const statusLabel = task.active ? 'Activa' : 'Detenida';
+    const statusClass = task.active ? 'status-active' : 'status-stopped';
+    return `
+      <tr>
+        <td>${escapeHtml(task.title)}</td>
+        <td>${daysStr}</td>
+        <td>${client ? escapeHtml(client.company || client.name) : '-'}</td>
+        <td>${assignee ? escapeHtml(assignee.name) : '-'}</td>
+        <td><span class="${statusClass}">${statusLabel}</span></td>
+        <td class="recurring-actions">
+          <button class="btn btn-secondary btn-sm" type="button" data-edit-recurring="${escapeHtml(task.id)}">Editar</button>
+          ${task.active ? `<button class="btn btn-danger btn-sm" type="button" data-stop-recurring="${escapeHtml(task.id)}">Detener</button>` : ''}
+        </td>
+      </tr>`;
+  }).join('');
+
+  const overlay = openModal(`
+    <div class="modal-overlay">
+      <div class="modal" style="max-width:780px;">
+        <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;">
+          <span>Tareas Recurrentes — ${escapeHtml(board.name)}</span>
+          <button class="btn btn-sm" type="button" data-new-recurring>+ Nueva</button>
+        </div>
+        ${tasks.length ? `
+          <div style="overflow-x:auto;">
+            <table class="recurring-table">
+              <thead><tr><th>Titulo</th><th>Dias</th><th>Cliente</th><th>Responsable</th><th>Estado</th><th></th></tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        ` : '<p style="padding:16px;color:var(--text-muted);">No hay tareas recurrentes en este tablero.</p>'}
+        <div class="modal-actions" style="justify-content:flex-end;">
+          <button class="btn btn-secondary" type="button" data-close-modal>Cerrar</button>
+        </div>
+      </div>
+    </div>
+  `);
+
+  overlay.querySelector('[data-new-recurring]')?.addEventListener('click', () => {
+    document.querySelector('#modal-root').innerHTML = '';
+    openRecurringTaskForm(null);
+  });
+
+  overlay.querySelectorAll('[data-edit-recurring]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const task = tasks.find((t) => t.id === btn.dataset.editRecurring);
+      if (!task) return;
+      document.querySelector('#modal-root').innerHTML = '';
+      openRecurringTaskForm(task);
+    });
+  });
+
+  overlay.querySelectorAll('[data-stop-recurring]').forEach((btn) => {
+    btn.addEventListener('click', async function () {
+      const task = tasks.find((t) => t.id === btn.dataset.stopRecurring);
+      if (!task) return;
+      if (!confirm(`Detener la tarea recurrente "${task.title}"? Las tarjetas ya creadas se conservaran.`)) return;
+      setButtonLoading(this, true, 'Deteniendo...');
+      try {
+        await api(`/api/boards/${board.id}/recurring-tasks/${task.id}`, { method: 'DELETE', body: JSON.stringify(auditUser()) });
+        document.querySelector('#modal-root').innerHTML = '';
+        await refresh();
+        openRecurringTasksPanel();
+      } catch (error) {
+        setButtonLoading(this, false);
+        alert(error.message);
+      }
+    });
+  });
+}
+
+function openRecurringTaskForm(task) {
+  const board = getActiveBoard(state);
+  const isEdit = Boolean(task);
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(new Date());
+  const dayNames = ['Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado', 'Domingo'];
+  const checkedDays = isEdit ? new Set(task.days.map((d) => d.weekday)) : new Set();
+  const dayColumnMap = isEdit ? new Map(task.days.map((d) => [d.weekday, d.columnId])) : new Map();
+
+  const dayRows = dayNames.map((name, index) => {
+    const weekday = index + 1;
+    const checked = checkedDays.has(weekday) ? 'checked' : '';
+    const columnOptions = board.columns.map((col) => `<option value="${escapeHtml(col.id)}" ${dayColumnMap.get(weekday) === col.id ? 'selected' : ''}>${escapeHtml(col.name)}</option>`).join('');
+    return `
+      <div class="recurrence-day-row">
+        <label class="checkbox-group">
+          <input type="checkbox" data-recurrence-day="${weekday}" ${checked}>
+          <span>${name}</span>
+        </label>
+        <select class="form-control" data-recurrence-column="${weekday}">${columnOptions}</select>
+      </div>`;
+  }).join('');
+
+  const overlay = openModal(`
+    <div class="modal-overlay">
+      <form class="modal">
+        <div class="modal-header">${isEdit ? 'Editar Tarea Recurrente' : 'Nueva Tarea Recurrente'}</div>
+        <div class="form-group"><label>Titulo</label><input type="text" id="rt-title" class="form-control" value="${escapeHtml(task?.title || '')}"></div>
+        <div class="form-group searchable-client-field">
+          <label for="card-client-search">Clientes <span class="optional-label">(opcional)</span></label>
+          <div class="selected-clients-list" data-selected-clients></div>
+          <input type="search" id="card-client-search" class="form-control" autocomplete="off" placeholder="Escribi para buscar cliente...">
+          <div class="client-search-results" data-client-results hidden></div>
+        </div>
+        <div class="form-group"><label>Descripcion</label><textarea id="rt-desc" class="form-control" rows="2">${escapeHtml(task?.description || '')}</textarea></div>
+        <div class="form-group"><label>Asignar a</label><select id="rt-assignee" class="form-control">${userOptions(task?.assignedTo)}</select></div>
+        <div class="recurrence-settings">
+          <div class="recurrence-date-grid">
+            <div class="form-group"><label>Fecha de inicio</label><input type="date" id="rt-start" class="form-control" value="${escapeHtml(task?.startDate || today)}" ${isEdit ? '' : `min="${today}"`}></div>
+            <div class="form-group"><label>Fecha de fin <span class="optional-label">(opcional)</span></label><input type="date" id="rt-end" class="form-control" value="${escapeHtml(task?.endDate || '')}"></div>
+          </div>
+          <div class="form-group">
+            <label>Dias y columna inicial</label>
+            <div class="recurrence-days">${dayRows}</div>
+          </div>
+        </div>
+        <div class="modal-actions" style="justify-content:flex-end;">
+          <button class="btn btn-secondary" type="button" data-back-to-list>Volver</button>
+          <button class="btn" type="submit">${isEdit ? 'Guardar Cambios' : 'Crear'}</button>
+        </div>
+      </form>
+    </div>
+  `);
+
+  setupMultiClientSearch(overlay, task?.clientId ? [task.clientId] : []);
+
+  overlay.querySelector('#rt-start')?.addEventListener('change', (event) => {
+    const endInput = overlay.querySelector('#rt-end');
+    endInput.min = event.target.value;
+    if (endInput.value && endInput.value < event.target.value) endInput.value = event.target.value;
+  });
+
+  overlay.querySelector('[data-back-to-list]').addEventListener('click', () => {
+    document.querySelector('#modal-root').innerHTML = '';
+    openRecurringTasksPanel();
+  });
+
+  let submitting = false;
+  overlay.querySelector('form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (submitting) return;
+    const title = overlay.querySelector('#rt-title').value.trim();
+    if (!title) return alert('El titulo es obligatorio.');
+    const days = [...overlay.querySelectorAll('[data-recurrence-day]:checked')].map((input) => ({
+      weekday: Number(input.dataset.recurrenceDay),
+      columnId: overlay.querySelector(`[data-recurrence-column="${input.dataset.recurrenceDay}"]`).value
+    }));
+    if (!days.length) return alert('Selecciona al menos un dia.');
+    const startDate = overlay.querySelector('#rt-start').value;
+    const endDate = overlay.querySelector('#rt-end').value;
+    if (!startDate) return alert('La fecha de inicio es obligatoria.');
+    if (endDate && endDate < startDate) return alert('La fecha de fin no puede ser anterior al inicio.');
+    const payload = {
+      title,
+      description: overlay.querySelector('#rt-desc').value.trim(),
+      clientIds: getSelectedClientIds(),
+      assignedTo: overlay.querySelector('#rt-assignee').value,
+      startDate,
+      endDate,
+      days,
+      ...auditUser()
+    };
+    const submitButton = overlay.querySelector('button[type="submit"]');
+    submitting = true;
+    setButtonLoading(submitButton, true, 'Guardando...');
+    try {
+      if (isEdit) {
+        await api(`/api/boards/${board.id}/recurring-tasks/${task.id}`, { method: 'PATCH', body: JSON.stringify(payload) });
+      } else {
+        await api(`/api/boards/${board.id}/recurring-tasks`, { method: 'POST', body: JSON.stringify(payload) });
+      }
+      document.querySelector('#modal-root').innerHTML = '';
+      await refresh();
+      openRecurringTasksPanel();
+    } catch (error) {
+      submitting = false;
+      setButtonLoading(submitButton, false);
+      alert(error.message);
+    }
+  });
 }
 
 function openBoardSettings() {
