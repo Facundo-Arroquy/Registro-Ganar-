@@ -440,7 +440,7 @@ async function getSupabaseState() {
     supabaseRest('/board_columns?select=id,board_id,name,position&order=position.asc'),
     supabaseRest('/cards?select=id,board_id,column_id,client_id,title,description,due_date,resolved,created_by,assigned_to,timer_status,timer_elapsed_seconds,timer_started_at,recurring_task_id,occurrence_date'),
     supabaseRest('/card_client_assignments?select=card_id,client_id'),
-    supabaseRest('/recurring_tasks?select=id,board_id,title,start_date,end_date,active'),
+    supabaseRest('/recurring_tasks?select=id,board_id,title,description,client_id,assigned_to,start_date,end_date,active'),
     supabaseRest('/recurring_task_days?select=recurring_task_id,weekday,column_id'),
     supabaseRest('/client_links?select=id,client_id,url,label'),
     supabaseRest('/general_links?select=id,url,label&order=created_at.asc')
@@ -510,6 +510,9 @@ async function getSupabaseState() {
       id: task.id,
       boardId: task.board_id,
       title: task.title,
+      description: task.description || '',
+      clientId: task.client_id || '',
+      assignedTo: task.assigned_to || '',
       startDate: task.start_date,
       endDate: task.end_date || '',
       active: task.active,
@@ -1955,10 +1958,11 @@ async function handleApi(req, res, url) {
       if (normalizedDays.some((day) => !Number.isInteger(day.weekday) || day.weekday < 1 || day.weekday > 7 || !board.columns.some((column) => column.id === day.columnId))) {
         return sendError(res, 400, 'La configuracion de dias o columnas es invalida');
       }
+      const rawClientIds = Array.isArray(body.clientIds) ? body.clientIds.map(String).filter(Boolean) : [];
       const recurringTask = {
         id: makeId('rt'),
         boardId: board.id,
-        clientId: String(body.clientId || ''),
+        clientId: rawClientIds[0] || String(body.clientId || ''),
         title,
         description: String(body.description || '').trim(),
         assignedTo: String(body.assignedTo || ''),
@@ -1995,9 +1999,58 @@ async function handleApi(req, res, url) {
         await supabaseRest(`/recurring_tasks?id=eq.${encodeURIComponent(recurringTask.id)}`, { method: 'DELETE' });
         throw error;
       }
-      await generateRecurringCardsThroughToday();
       recordAuditInBackground(body, `Creo la tarea recurrente "${title}" en "${board.name}"`);
-      return sendJson(res, 201, { recurringTask });
+      sendJson(res, 201, { recurringTask });
+      generateRecurringCardsThroughToday().catch(() => {});
+      return;
+    }
+
+    if (req.method === 'PATCH' && segments[3] === 'recurring-tasks' && segments[4]) {
+      const recurringTaskId = segments[4];
+      const tasks = await supabaseRest(`/recurring_tasks?select=id,title,board_id&board_id=eq.${encodeURIComponent(board.id)}&id=eq.${encodeURIComponent(recurringTaskId)}&limit=1`);
+      if (!tasks[0]) return sendError(res, 404, 'Tarea recurrente no encontrada');
+      const patch = {};
+      if (body.title !== undefined) {
+        const title = String(body.title).trim();
+        if (!title) return sendError(res, 400, 'El titulo es obligatorio');
+        patch.title = title;
+      }
+      if (body.description !== undefined) patch.description = String(body.description).trim();
+      if (body.assignedTo !== undefined) patch.assigned_to = body.assignedTo || null;
+      if (body.clientIds !== undefined) patch.client_id = (Array.isArray(body.clientIds) ? body.clientIds[0] : body.clientIds) || null;
+      if (body.startDate !== undefined) {
+        if (!body.startDate) return sendError(res, 400, 'La fecha de inicio es obligatoria');
+        patch.start_date = body.startDate;
+      }
+      if (body.endDate !== undefined) patch.end_date = body.endDate || null;
+      if (Object.keys(patch).length) {
+        await supabaseRest(`/recurring_tasks?id=eq.${encodeURIComponent(recurringTaskId)}`, {
+          method: 'PATCH',
+          body: JSON.stringify(patch)
+        });
+      }
+      if (Array.isArray(body.days)) {
+        const normalizedDays = body.days.map((day) => ({
+          weekday: Number(day.weekday),
+          columnId: String(day.columnId)
+        }));
+        if (!normalizedDays.length) return sendError(res, 400, 'Selecciona al menos un dia');
+        if (normalizedDays.some((day) => !Number.isInteger(day.weekday) || day.weekday < 1 || day.weekday > 7 || !board.columns.some((col) => col.id === day.columnId))) {
+          return sendError(res, 400, 'La configuracion de dias o columnas es invalida');
+        }
+        await supabaseRest(`/recurring_task_days?recurring_task_id=eq.${encodeURIComponent(recurringTaskId)}`, { method: 'DELETE' });
+        await supabaseRest('/recurring_task_days', {
+          method: 'POST',
+          headers: { Prefer: 'return=representation' },
+          body: JSON.stringify(normalizedDays.map((day) => ({
+            recurring_task_id: recurringTaskId,
+            weekday: day.weekday,
+            column_id: day.columnId
+          })))
+        });
+      }
+      recordAuditInBackground(body, `Edito la tarea recurrente "${patch.title || tasks[0].title}" en "${board.name}"`);
+      return sendJson(res, 200, { updated: true });
     }
 
     if (req.method === 'DELETE' && segments[3] === 'recurring-tasks' && segments[4]) {
