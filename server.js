@@ -426,7 +426,7 @@ async function generateRecurringCardsThroughToday() {
 }
 
 async function getSupabaseState() {
-  const [users, statuses, consultors, complexities, adStatuses, auditRows, clients, consultorAssignments, ownerAssignments, boards, columns, cards, cardClientAssignments, recurringTasks, recurringDays, clientLinks, generalLinks] = await Promise.all([
+  const [users, statuses, consultors, complexities, adStatuses, auditRows, clients, consultorAssignments, ownerAssignments, boards, columns, cards, cardClientAssignments, cardAssigneeAssignments, recurringTasks, recurringDays, clientLinks, generalLinks] = await Promise.all([
     supabaseRest('/app_users?select=id,email,name&order=name.asc'),
     getSupabaseStatuses(),
     getSupabaseConsultors(),
@@ -440,6 +440,7 @@ async function getSupabaseState() {
     supabaseRest('/board_columns?select=id,board_id,name,position&order=position.asc'),
     supabaseRest('/cards?select=id,board_id,column_id,client_id,title,description,due_date,resolved,created_by,assigned_to,timer_status,timer_elapsed_seconds,timer_started_at,recurring_task_id,occurrence_date'),
     supabaseRest('/card_client_assignments?select=card_id,client_id'),
+    supabaseRest('/card_assignee_assignments?select=card_id,user_id'),
     supabaseRest('/recurring_tasks?select=id,board_id,title,description,client_id,assigned_to,start_date,end_date,active'),
     supabaseRest('/recurring_task_days?select=recurring_task_id,weekday,column_id'),
     supabaseRest('/client_links?select=id,client_id,url,label'),
@@ -488,6 +489,7 @@ async function getSupabaseState() {
       })),
       cards: cards.filter((card) => card.board_id === board.id).map((card) => {
         const cardClients = cardClientAssignments.filter((item) => item.card_id === card.id).map((item) => item.client_id);
+        const cardAssignees = cardAssigneeAssignments.filter((item) => item.card_id === card.id).map((item) => item.user_id);
         return {
         id: card.id,
         columnId: card.column_id,
@@ -498,7 +500,8 @@ async function getSupabaseState() {
         dueDate: card.due_date || '',
         resolved: Boolean(card.resolved),
         createdBy: card.created_by || '',
-        assignedTo: card.assigned_to || '',
+        assignedTo: cardAssignees[0] || card.assigned_to || '',
+        assigneeIds: cardAssignees.length ? cardAssignees : (card.assigned_to ? [card.assigned_to] : []),
         recurringTaskId: card.recurring_task_id || '',
         occurrenceDate: card.occurrence_date || '',
         timerStatus: card.timer_status,
@@ -603,6 +606,15 @@ async function replaceCardClients(cardId, clientIds) {
   await supabaseRest('/card_client_assignments', {
     method: 'POST',
     body: JSON.stringify(clientIds.map((clientId) => ({ card_id: cardId, client_id: clientId })))
+  });
+}
+
+async function replaceCardAssignees(cardId, userIds) {
+  await supabaseRest(`/card_assignee_assignments?card_id=eq.${encodeURIComponent(cardId)}`, { method: 'DELETE' });
+  if (!userIds.length) return;
+  await supabaseRest('/card_assignee_assignments', {
+    method: 'POST',
+    body: JSON.stringify(userIds.map((userId) => ({ card_id: cardId, user_id: userId })))
   });
 }
 
@@ -805,9 +817,13 @@ async function getSupabaseBoard(boardId) {
   ]);
   if (!board) return null;
   let boardCardClientAssignments = [];
+  let boardCardAssigneeAssignments = [];
   if (cards.length) {
     const cardIds = cards.map((c) => `"${c.id.replaceAll('"', '')}"`).join(',');
-    boardCardClientAssignments = await supabaseRest(`/card_client_assignments?select=card_id,client_id&card_id=in.(${encodeURIComponent(cardIds)})`);
+    [boardCardClientAssignments, boardCardAssigneeAssignments] = await Promise.all([
+      supabaseRest(`/card_client_assignments?select=card_id,client_id&card_id=in.(${encodeURIComponent(cardIds)})`),
+      supabaseRest(`/card_assignee_assignments?select=card_id,user_id&card_id=in.(${encodeURIComponent(cardIds)})`)
+    ]);
   }
   return {
     id: board.id,
@@ -816,6 +832,7 @@ async function getSupabaseBoard(boardId) {
     columns: columns.map((column) => ({ id: column.id, name: column.name })),
     cards: cards.map((card) => {
       const cardClients = boardCardClientAssignments.filter((item) => item.card_id === card.id).map((item) => item.client_id);
+      const cardAssignees = boardCardAssigneeAssignments.filter((item) => item.card_id === card.id).map((item) => item.user_id);
       return {
       id: card.id,
       columnId: card.column_id,
@@ -826,7 +843,8 @@ async function getSupabaseBoard(boardId) {
       dueDate: card.due_date || '',
       resolved: Boolean(card.resolved),
       createdBy: card.created_by || '',
-      assignedTo: card.assigned_to || '',
+      assignedTo: cardAssignees[0] || card.assigned_to || '',
+      assigneeIds: cardAssignees.length ? cardAssignees : (card.assigned_to ? [card.assigned_to] : []),
       recurringTaskId: card.recurring_task_id || '',
       occurrenceDate: card.occurrence_date || '',
       timerStatus: card.timer_status,
@@ -2113,6 +2131,7 @@ async function handleApi(req, res, url) {
       const title = String(body.title || '').trim();
       if (!title) return sendError(res, 400, 'El titulo es obligatorio');
       const rawClientIds = Array.isArray(body.clientIds) ? body.clientIds.map(String).filter(Boolean) : [];
+      const rawAssigneeIds = Array.isArray(body.assigneeIds) ? body.assigneeIds.map(String).filter(Boolean) : [];
       const card = {
         id: makeId('k'),
         columnId: String(body.columnId || ''),
@@ -2123,7 +2142,8 @@ async function handleApi(req, res, url) {
         dueDate: String(body.dueDate || ''),
         resolved: Boolean(body.resolved),
         createdBy: String(body.createdBy || ''),
-        assignedTo: String(body.assignedTo || ''),
+        assignedTo: rawAssigneeIds[0] || String(body.assignedTo || ''),
+        assigneeIds: rawAssigneeIds.length ? rawAssigneeIds : (body.assignedTo ? [String(body.assignedTo)] : []),
         timerStatus: 'idle',
         timerElapsedSeconds: 0,
         timerStartedAt: null
@@ -2145,7 +2165,10 @@ async function handleApi(req, res, url) {
           assigned_to: card.assignedTo || null
         }])
       });
-      await replaceCardClients(card.id, card.clientIds);
+      await Promise.all([
+        replaceCardClients(card.id, card.clientIds),
+        replaceCardAssignees(card.id, card.assigneeIds)
+      ]);
       board.cards.push(card);
       recordAuditInBackground(body, `Creo la tarjeta "${title}" en "${board.name}"`);
       return sendJson(res, 201, { card, board });
@@ -2157,6 +2180,7 @@ async function handleApi(req, res, url) {
       const previousColumnId = card.columnId;
       const previousTitle = card.title;
       const patchClientIds = Array.isArray(body.clientIds) ? body.clientIds.map(String).filter(Boolean) : null;
+      const patchAssigneeIds = Array.isArray(body.assigneeIds) ? body.assigneeIds.map(String).filter(Boolean) : null;
       Object.assign(card, {
         title: body.title === undefined ? card.title : String(body.title).trim(),
         clientId: patchClientIds ? (patchClientIds[0] || '') : (body.clientId === undefined ? card.clientId : String(body.clientId)),
@@ -2164,7 +2188,8 @@ async function handleApi(req, res, url) {
         description: body.description === undefined ? card.description : String(body.description).trim(),
         dueDate: body.dueDate === undefined ? card.dueDate : String(body.dueDate),
         resolved: body.resolved === undefined ? card.resolved : Boolean(body.resolved),
-        assignedTo: body.assignedTo === undefined ? card.assignedTo : String(body.assignedTo),
+        assignedTo: patchAssigneeIds ? (patchAssigneeIds[0] || '') : (body.assignedTo === undefined ? card.assignedTo : String(body.assignedTo)),
+        assigneeIds: patchAssigneeIds || card.assigneeIds || (card.assignedTo ? [card.assignedTo] : []),
         columnId: body.columnId === undefined ? card.columnId : String(body.columnId)
       });
       if (!card.title) return sendError(res, 400, 'El titulo es obligatorio');
@@ -2182,7 +2207,10 @@ async function handleApi(req, res, url) {
           assigned_to: card.assignedTo || null
         })
       });
-      if (patchClientIds) await replaceCardClients(card.id, card.clientIds);
+      const junctionUpdates = [];
+      if (patchClientIds) junctionUpdates.push(replaceCardClients(card.id, card.clientIds));
+      if (patchAssigneeIds) junctionUpdates.push(replaceCardAssignees(card.id, card.assigneeIds));
+      if (junctionUpdates.length) await Promise.all(junctionUpdates);
       if (previousColumnId !== card.columnId) {
         const fromColumn = board.columns.find((column) => column.id === previousColumnId);
         const toColumn = board.columns.find((column) => column.id === card.columnId);
