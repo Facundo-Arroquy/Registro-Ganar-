@@ -2854,6 +2854,54 @@ header {
   border-bottom: 0;
 }
 
+.ad-comments-section {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-color);
+}
+
+.ad-comments-list {
+  margin-bottom: 12px;
+}
+
+.ad-comment-item {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-main);
+  margin-bottom: 8px;
+}
+
+.ad-comment-item:last-child {
+  margin-bottom: 0;
+}
+
+.ad-comment-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 0.72rem;
+}
+
+.ad-comment-meta strong {
+  color: var(--text-main);
+}
+
+.ad-comment-meta span {
+  color: var(--text-muted);
+}
+
+.ad-comment-item p {
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--text-main);
+  white-space: pre-wrap;
+}
+
+.ad-comment-form textarea {
+  min-height: 56px;
+}
+
 .advertising-toolbar label > span {
   display: block;
   margin-bottom: 6px;

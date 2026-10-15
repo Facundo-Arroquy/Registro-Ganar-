@@ -105,6 +105,28 @@ function renderAdvertisingGrids() {
   }
   container.innerHTML = [...selectedClientIds].map((clientId) => renderClientGrid(clientId, details.get(clientId))).join('');
   container.querySelectorAll('[data-edit-client-advertising]').forEach((button) => button.addEventListener('click', () => openAdvertisingEditor(button.dataset.editClientAdvertising)));
+  container.querySelectorAll('[data-toggle-comments]').forEach((button) => button.addEventListener('click', () => {
+    const section = button.closest('.advertising-client-grid').querySelector('.ad-comments-section');
+    const isOpen = section.style.display !== 'none';
+    section.style.display = isOpen ? 'none' : 'block';
+    button.textContent = isOpen ? 'Comentarios' : 'Ocultar comentarios';
+  }));
+  container.querySelectorAll('.ad-comment-form').forEach((form) => {
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const cid = form.dataset.clientId;
+      const textarea = form.querySelector('textarea');
+      const button = form.querySelector('button[type="submit"]');
+      const content = textarea.value.trim();
+      if (!content) return;
+      setButtonLoading(button, true, 'Guardando...');
+      try {
+        await api(`/api/clients/${encodeURIComponent(cid)}/comments`, { method: 'POST', body: JSON.stringify({ content }) });
+        details.set(cid, await api(`/api/clients/${encodeURIComponent(cid)}/detail`));
+        renderAdvertisingGrids();
+      } catch (error) { alert(error.message); setButtonLoading(button, false); }
+    });
+  });
 }
 
 function renderClientGrid(clientId, detail) {
@@ -112,8 +134,9 @@ function renderClientGrid(clientId, detail) {
   const weeks = clientWeeks(detail);
   const hasData = weeks.some((week) => ['roas', 'tacos', 'dailyBudget', 'consumedBudget', 'targetTacos'].some((key) => week[key] !== null));
   const title = escapeHtml(detail.client.company || detail.client.name);
-  const heading = `<div class="advertising-client-heading"><div><p class="eyebrow">Cuenta</p><h2>${title}</h2></div><div class="advertising-grid-actions"><a class="btn btn-secondary btn-sm" href="/cliente?id=${encodeURIComponent(clientId)}">Ver cliente</a><button class="btn btn-sm" type="button" data-edit-client-advertising="${escapeHtml(clientId)}">Editar</button></div></div>`;
-  if (!hasData) return `<article class="advertising-client-grid">${heading}<div class="client-empty-state compact">Sin publicidad cargada para ${monthNames[selectedMonth - 1]} ${selectedYear}.</div></article>`;
+  const heading = `<div class="advertising-client-heading"><div><p class="eyebrow">Cuenta</p><h2>${title}</h2></div><div class="advertising-grid-actions"><a class="btn btn-secondary btn-sm" href="/cliente?id=${encodeURIComponent(clientId)}">Ver cliente</a><button class="btn btn-secondary btn-sm" type="button" data-toggle-comments>Comentarios</button><button class="btn btn-sm" type="button" data-edit-client-advertising="${escapeHtml(clientId)}">Editar</button></div></div>`;
+  const commentsSection = renderAdComments(clientId, detail);
+  if (!hasData) return `<article class="advertising-client-grid">${heading}<div class="client-empty-state compact">Sin publicidad cargada para ${monthNames[selectedMonth - 1]} ${selectedYear}.</div>${commentsSection}</article>`;
   const totalDays = new Date(Date.UTC(selectedYear, selectedMonth, 0)).getUTCDate();
   const realBudget = weeks.reduce((sum, week) => sum + Number(week.consumedBudget || 0), 0);
   const dailyBudget = averageFilled(weeks, 'dailyBudget');
@@ -130,7 +153,22 @@ function renderClientGrid(clientId, detail) {
   const alertClass = (actual, target) => actual !== null && actual !== undefined && target !== null && target !== undefined && Number(actual) > Number(target) ? ' tacos-over-target' : '';
   return `<article class="advertising-client-grid">${heading}
     <div class="advertising-summary"><div class="metric-kpi"><span>Presupuesto real</span><strong>${formatMetric(realBudget, true)}</strong></div><div class="metric-kpi"><span>Presupuesto proyectado</span><strong>${formatMetric(projectedBudget, true)}</strong></div><div class="metric-kpi"><span>TACOS objetivo</span><strong>${formatPercent(targetTacos)}</strong></div></div>
-    <div class="metrics-table-wrap"><table class="table metrics-table advertising-table"><thead><tr><th>Métrica</th>${weeks.map((week) => `<th>Semana ${week.week}</th>`).join('')}<th class="monthly-close-column">Cierre mensual</th></tr></thead><tbody>${rows.map((row) => `<tr><td><strong>${row.label}</strong></td>${weeks.map((week) => `<td class="${row.compare ? alertClass(week[row.key], week.targetTacos) : ''}">${formatter(week[row.key], row.type)}</td>`).join('')}<td class="monthly-close-column${row.compare ? alertClass(row.close, targetTacos) : ''}">${formatter(row.close, row.type)}</td></tr>`).join('')}<tr><td><strong>Presupuesto proyectado</strong></td>${weeks.map((week, index) => `<td>${formatMetric(week.dailyBudget === null ? null : Number(week.dailyBudget) * Math.max(0, Math.min(7, totalDays - index * 7)), true)}</td>`).join('')}<td class="monthly-close-column">${formatMetric(projectedBudget, true)}</td></tr></tbody></table></div></article>`;
+    <div class="metrics-table-wrap"><table class="table metrics-table advertising-table"><thead><tr><th>Métrica</th>${weeks.map((week) => `<th>Semana ${week.week}</th>`).join('')}<th class="monthly-close-column">Cierre mensual</th></tr></thead><tbody>${rows.map((row) => `<tr><td><strong>${row.label}</strong></td>${weeks.map((week) => `<td class="${row.compare ? alertClass(week[row.key], week.targetTacos) : ''}">${formatter(week[row.key], row.type)}</td>`).join('')}<td class="monthly-close-column${row.compare ? alertClass(row.close, targetTacos) : ''}">${formatter(row.close, row.type)}</td></tr>`).join('')}<tr><td><strong>Presupuesto proyectado</strong></td>${weeks.map((week, index) => `<td>${formatMetric(week.dailyBudget === null ? null : Number(week.dailyBudget) * Math.max(0, Math.min(7, totalDays - index * 7)), true)}</td>`).join('')}<td class="monthly-close-column">${formatMetric(projectedBudget, true)}</td></tr></tbody></table></div>${commentsSection}</article>`;
+}
+
+function renderAdComments(clientId, detail) {
+  const manual = detail?.manualComments || [];
+  const recent = manual.slice(0, 3);
+  const commentsList = recent.length
+    ? recent.map((c) => `<div class="ad-comment-item"><div class="ad-comment-meta"><strong>${escapeHtml(c.authorName)}</strong><span>${formatCommentDate(c.createdAt)}${c.updatedAt !== c.createdAt ? ' · editado' : ''}</span></div><p>${escapeHtml(c.content)}</p></div>`).join('')
+    : '<p class="muted-value" style="margin-bottom:10px">Sin comentarios todavía.</p>';
+  return `<div class="ad-comments-section" style="display:none"><div class="ad-comments-list">${commentsList}</div><form class="ad-comment-form comment-composer" data-client-id="${escapeHtml(clientId)}"><textarea class="form-control" rows="2" maxlength="10000" placeholder="Agregar comentario..." aria-label="Nuevo comentario"></textarea><div><span>Se agrega al historial general del cliente</span><button class="btn btn-sm" type="submit">Agregar</button></div></form></div>`;
+}
+
+function formatCommentDate(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  return `${d.toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' })} ${d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}`;
 }
 
 function renderLoading() {
