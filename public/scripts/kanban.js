@@ -99,7 +99,8 @@ function renderClientFilter(board) {
 function renderCard(card) {
   const cardClients = (card.clientIds || []).map((id) => state.clients.find((item) => item.id === id)).filter(Boolean);
   if (!cardClients.length && card.clientId) { const fallback = state.clients.find((item) => item.id === card.clientId); if (fallback) cardClients.push(fallback); }
-  const assignee = state.users.find((item) => item.id === card.assignedTo);
+  const cardAssignees = (card.assigneeIds || []).map((id) => state.users.find((item) => item.id === id)).filter(Boolean);
+  if (!cardAssignees.length && card.assignedTo) { const fallback = state.users.find((item) => item.id === card.assignedTo); if (fallback) cardAssignees.push(fallback); }
   const dueStatus = getDueDateStatus(card.dueDate, card.resolved);
   return `
     <article class="card" draggable="true" id="${escapeHtml(card.id)}" data-card-id="${escapeHtml(card.id)}">
@@ -114,7 +115,7 @@ function renderCard(card) {
       </div>
       <div class="card-meta">
         <span>${cardClients.length ? cardClients.map((c) => escapeHtml(c.name)).join(', ') : 'Sin cliente'}</span>
-        <div>${assignee ? `<div class="avatar">${getInitials(assignee.name)}</div>` : '<span style="opacity:0.5;">-</span>'}</div>
+        <div class="assignee-avatars">${cardAssignees.length ? cardAssignees.map((u) => `<div class="avatar" title="${escapeHtml(u.name)}">${getInitials(u.name)}</div>`).join('') : '<span style="opacity:0.5;">-</span>'}</div>
       </div>
     </article>
   `;
@@ -289,7 +290,12 @@ function openCardModal(columnId, card = null) {
         </div>
         <div class="form-group"><label>Descripcion</label><textarea id="card-desc-input" class="form-control" rows="3">${escapeHtml(card?.description || '')}</textarea></div>
         <div class="form-group" data-due-date><label>Fecha de Vencimiento</label><input type="date" id="card-due-input" class="form-control" value="${escapeHtml(card?.dueDate || '')}"></div>
-        <div class="form-group"><label>Asignar a</label><select id="card-assignee-select" class="form-control">${userOptions(card?.assignedTo)}</select></div>
+        <div class="form-group searchable-assignee-field">
+          <label for="card-assignee-search">Asignados <span class="optional-label">(podés elegir más de uno)</span></label>
+          <div class="selected-assignees-list" data-selected-assignees></div>
+          <input type="search" id="card-assignee-search" class="form-control" autocomplete="off" placeholder="Escribí para buscar usuario...">
+          <div class="assignee-search-results" data-assignee-results hidden></div>
+        </div>
         <div class="form-group"><label class="checkbox-group"><input type="checkbox" id="card-resolved-input" ${card?.resolved ? 'checked' : ''}><span>Resuelta (no aparecerá como vencida)</span></label></div>
         ${!isEdit ? `
           <div class="form-group recurrence-toggle">
@@ -320,6 +326,7 @@ function openCardModal(columnId, card = null) {
     </div>
   `);
   setupMultiClientSearch(overlay, card?.clientIds || (card?.clientId ? [card.clientId] : []));
+  setupMultiAssigneeSearch(overlay, card?.assigneeIds || (card?.assignedTo ? [card.assignedTo] : []));
   const recurrenceToggle = overlay.querySelector('#card-recurring-toggle');
   recurrenceToggle?.addEventListener('change', () => {
     overlay.querySelector('[data-recurrence-settings]').hidden = !recurrenceToggle.checked;
@@ -401,7 +408,7 @@ async function saveCard(columnId, card) {
     clientIds: getSelectedClientIds(),
     description: document.querySelector('#card-desc-input').value.trim(),
     dueDate: document.querySelector('#card-due-input').value,
-    assignedTo: document.querySelector('#card-assignee-select').value,
+    assigneeIds: getSelectedAssigneeIds(),
     resolved: document.querySelector('#card-resolved-input').checked,
     createdBy: currentUser.id,
     ...auditUser()
@@ -777,9 +784,14 @@ function openBoardSettings() {
 }
 
 let _selectedClientIds = [];
+let _selectedAssigneeIds = [];
 
 function getSelectedClientIds() {
   return [..._selectedClientIds];
+}
+
+function getSelectedAssigneeIds() {
+  return [..._selectedAssigneeIds];
 }
 
 function setupMultiClientSearch(overlay, initialIds = []) {
@@ -811,6 +823,47 @@ function setupMultiClientSearch(overlay, initialIds = []) {
     results.querySelectorAll('[data-client-id]').forEach((button) => button.addEventListener('mousedown', (event) => {
       event.preventDefault();
       _selectedClientIds.push(button.dataset.clientId);
+      search.value = '';
+      results.hidden = true;
+      renderSelected();
+    }));
+  };
+
+  search.addEventListener('focus', renderResults);
+  search.addEventListener('input', renderResults);
+  search.addEventListener('blur', () => setTimeout(() => { results.hidden = true; }, 100));
+  renderSelected();
+}
+
+function setupMultiAssigneeSearch(overlay, initialIds = []) {
+  _selectedAssigneeIds = [...initialIds];
+  const search = overlay.querySelector('#card-assignee-search');
+  const results = overlay.querySelector('[data-assignee-results]');
+  const listEl = overlay.querySelector('[data-selected-assignees]');
+
+  const renderSelected = () => {
+    listEl.innerHTML = _selectedAssigneeIds.map((id) => {
+      const user = state.users.find((item) => item.id === id);
+      if (!user) return '';
+      return `<span class="selected-client-tag">${escapeHtml(user.name)} <button type="button" data-remove-assignee="${escapeHtml(id)}">&times;</button></span>`;
+    }).join('');
+    listEl.querySelectorAll('[data-remove-assignee]').forEach((btn) => btn.addEventListener('click', () => {
+      _selectedAssigneeIds = _selectedAssigneeIds.filter((id) => id !== btn.dataset.removeAssignee);
+      renderSelected();
+    }));
+  };
+
+  const renderResults = () => {
+    const term = search.value.trim().toLocaleLowerCase('es');
+    const matches = state.users
+      .filter((user) => !_selectedAssigneeIds.includes(user.id))
+      .filter((user) => !term || user.name.toLocaleLowerCase('es').includes(term))
+      .slice(0, 10);
+    results.innerHTML = matches.map((user) => `<button type="button" data-assignee-id="${escapeHtml(user.id)}"><strong>${escapeHtml(user.name)}</strong></button>`).join('') || '<span style="padding:8px;color:var(--text-muted);font-size:0.8rem;">Sin resultados</span>';
+    results.hidden = false;
+    results.querySelectorAll('[data-assignee-id]').forEach((button) => button.addEventListener('mousedown', (event) => {
+      event.preventDefault();
+      _selectedAssigneeIds.push(button.dataset.assigneeId);
       search.value = '';
       results.hidden = true;
       renderSelected();

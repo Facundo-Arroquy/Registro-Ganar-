@@ -682,8 +682,16 @@ header {
 .quick-resolve-btn:hover { filter: brightness(1.18); }
 .quick-resolve-btn:disabled { opacity: 0.55; cursor: wait; }
 
-.searchable-client-field { position: relative; }
+.searchable-client-field, .searchable-assignee-field { position: relative; }
 
+.selected-assignees-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.assignee-search-results,
 .client-search-results {
   position: absolute;
   z-index: 20;
@@ -698,6 +706,7 @@ header {
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
 }
 
+.assignee-search-results button,
 .client-search-results button {
   display: flex;
   width: 100%;
@@ -713,8 +722,13 @@ header {
   text-align: left;
 }
 
+.assignee-search-results button:hover,
 .client-search-results button:hover { background: var(--bg-card-hover); }
+.assignee-search-results button span,
 .client-search-results button span { color: var(--text-muted); font-size: 0.72rem; }
+
+.assignee-avatars { display: flex; gap: 2px; flex-wrap: wrap; }
+.assignee-avatars .avatar { font-size: 0.6rem; width: 24px; height: 24px; }
 
 .multi-tag-options {
   display: flex;
