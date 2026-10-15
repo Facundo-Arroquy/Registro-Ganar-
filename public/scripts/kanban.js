@@ -14,6 +14,11 @@ let selectedClientId = '';
 async function boot() {
   state = await loadAppState();
   renderPage();
+  const pendingCard = localStorage.getItem('pendingCardOpen');
+  if (pendingCard) {
+    localStorage.removeItem('pendingCardOpen');
+    openCardDetail(pendingCard);
+  }
 }
 
 async function refresh() {
@@ -297,6 +302,7 @@ function openCardModal(columnId, card = null) {
           <div class="assignee-search-results" data-assignee-results hidden></div>
         </div>
         <div class="form-group"><label class="checkbox-group"><input type="checkbox" id="card-resolved-input" ${card?.resolved ? 'checked' : ''}><span>Resuelta (no aparecerá como vencida)</span></label></div>
+        <div class="form-group"><label class="checkbox-group"><input type="checkbox" id="card-notify-input" checked><span>Notificar a asignados</span></label></div>
         ${!isEdit ? `
           <div class="form-group recurrence-toggle">
             <label class="checkbox-group"><input type="checkbox" id="card-recurring-toggle"><span>Repetir esta tarea</span></label>
@@ -410,6 +416,7 @@ async function saveCard(columnId, card) {
     dueDate: document.querySelector('#card-due-input').value,
     assigneeIds: getSelectedAssigneeIds(),
     resolved: document.querySelector('#card-resolved-input').checked,
+    notifyAssignees: document.querySelector('#card-notify-input').checked,
     createdBy: currentUser.id,
     ...auditUser()
   };
