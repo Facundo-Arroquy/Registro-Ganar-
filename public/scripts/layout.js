@@ -1,6 +1,9 @@
 import { api, clearSession, setSessionUser, getSessionToken } from './api.js';
 import { escapeHtml, getInitials, setButtonLoading } from './utils.js';
 
+let notificationPanelOpen = false;
+let notificationsCache = [];
+
 export function renderSidebar({ state, currentUser, activePage, onRefresh }) {
   const sidebar = document.querySelector('[data-sidebar]');
   sidebar.innerHTML = `
@@ -34,6 +37,9 @@ export function renderSidebar({ state, currentUser, activePage, onRefresh }) {
   });
 
   sidebar.querySelector('[data-open-profile]').addEventListener('click', () => openProfileModal({ currentUser, onRefresh }));
+
+  // Notifications – rendered outside sidebar as fixed element
+  renderNotificationBell();
 
   // Inject back button in main content area
   injectBackButton();
@@ -382,5 +388,111 @@ export function openInviteModal({ onRefresh }) {
       setButtonLoading(submitButton, false);
       showError(error.message);
     }
+  });
+}
+
+// --- Notifications ---
+
+function timeAgo(dateStr) {
+  const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
+  if (seconds < 60) return 'hace un momento';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `hace ${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `hace ${hours}h`;
+  const days = Math.floor(hours / 24);
+  return `hace ${days}d`;
+}
+
+function renderNotificationBell() {
+  // Remove previous instance if re-rendering sidebar
+  document.querySelector('.notification-fixed')?.remove();
+
+  const wrapper = document.createElement('div');
+  wrapper.className = 'notification-fixed';
+  wrapper.innerHTML = `
+    <button class="notification-bell" type="button" data-notification-bell title="Notificaciones">
+      &#128276;<span class="notification-count" data-notification-count style="display:none;">0</span>
+    </button>
+    <div class="notification-panel" data-notification-panel></div>
+  `;
+  document.body.appendChild(wrapper);
+
+  wrapper.querySelector('[data-notification-bell]').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const panel = wrapper.querySelector('[data-notification-panel]');
+    if (notificationPanelOpen) {
+      panel.classList.remove('open');
+      notificationPanelOpen = false;
+    } else {
+      notificationPanelOpen = true;
+      renderNotificationPanel(wrapper);
+      panel.classList.add('open');
+    }
+  });
+
+  document.addEventListener('click', (e) => {
+    if (notificationPanelOpen && !e.target.closest('.notification-fixed')) {
+      wrapper.querySelector('[data-notification-panel]').classList.remove('open');
+      notificationPanelOpen = false;
+    }
+  });
+
+  fetchNotifications(wrapper);
+}
+
+async function fetchNotifications(wrapper) {
+  try {
+    const { notifications } = await api('/api/notifications');
+    notificationsCache = notifications || [];
+    const unread = notificationsCache.filter((n) => !n.read).length;
+    const badge = wrapper.querySelector('[data-notification-count]');
+    if (badge) {
+      badge.textContent = unread;
+      badge.style.display = unread > 0 ? '' : 'none';
+    }
+  } catch {
+    // silent
+  }
+}
+
+function renderNotificationPanel(wrapper) {
+  const panel = wrapper.querySelector('[data-notification-panel]');
+  if (!panel) return;
+  const hasUnread = notificationsCache.some((n) => !n.read);
+  panel.innerHTML = `
+    <div class="notification-panel-header">
+      <span>Notificaciones</span>
+      ${hasUnread ? '<button type="button" data-mark-all-read>Marcar todas leidas</button>' : ''}
+    </div>
+    ${notificationsCache.length ? notificationsCache.map((n) => `
+      <div class="notification-item ${n.read ? 'read' : 'unread'}" data-notif-id="${escapeHtml(n.id)}" data-notif-card="${escapeHtml(n.cardId)}" data-notif-board="${escapeHtml(n.boardId)}">
+        <div class="notification-item-text"><strong>${escapeHtml(n.actorName)}</strong> te asigno a <strong>${escapeHtml(n.cardTitle)}</strong> en ${escapeHtml(n.boardName)}</div>
+        <div class="notification-item-time">${timeAgo(n.createdAt)}</div>
+      </div>
+    `).join('') : '<div class="notification-empty">Sin notificaciones</div>'}
+  `;
+
+  panel.querySelector('[data-mark-all-read]')?.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    await api('/api/notifications/mark-read', { method: 'POST', body: JSON.stringify({}) });
+    notificationsCache.forEach((n) => { n.read = true; });
+    const badge = wrapper.querySelector('[data-notification-count]');
+    if (badge) badge.style.display = 'none';
+    renderNotificationPanel(wrapper);
+  });
+
+  panel.querySelectorAll('.notification-item').forEach((el) => {
+    el.addEventListener('click', async () => {
+      const notifId = el.dataset.notifId;
+      const cardId = el.dataset.notifCard;
+      const boardId = el.dataset.notifBoard;
+      if (!el.classList.contains('read')) {
+        api('/api/notifications/mark-read', { method: 'POST', body: JSON.stringify({ notificationId: notifId }) }).catch(() => {});
+      }
+      localStorage.setItem('activeBoardId', boardId);
+      localStorage.setItem('pendingCardOpen', cardId);
+      window.location.href = '/kanban';
+    });
   });
 }

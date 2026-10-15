@@ -618,6 +618,21 @@ async function replaceCardAssignees(cardId, userIds) {
   });
 }
 
+async function createNotificationsForCard({ cardId, boardId, cardTitle, boardName, actorName, assigneeIds }) {
+  if (!assigneeIds.length) return;
+  const rows = assigneeIds.map((userId) => ({
+    id: makeId('ntf'),
+    user_id: userId,
+    card_id: cardId,
+    board_id: boardId,
+    card_title: cardTitle,
+    board_name: boardName,
+    actor_name: actorName,
+    read: false
+  }));
+  await supabaseRest('/notifications', { method: 'POST', body: JSON.stringify(rows) });
+}
+
 async function getSupabaseStatuses() {
   try {
     const rows = await supabaseRest('/client_statuses?select=id,name,position,color&order=position.asc');
@@ -1038,6 +1053,33 @@ async function handleApi(req, res, url) {
 
   const apiUser = await requireApiUser(req, res);
   if (!apiUser) return;
+
+  // --- Notifications API ---
+
+  if (req.method === 'GET' && url.pathname === '/api/notifications') {
+    const rows = await supabaseRest(`/notifications?user_id=eq.${encodeURIComponent(apiUser.id)}&order=created_at.desc&limit=50`);
+    return sendJson(res, 200, {
+      notifications: rows.map((r) => ({
+        id: r.id, userId: r.user_id, cardId: r.card_id, boardId: r.board_id,
+        cardTitle: r.card_title, boardName: r.board_name, actorName: r.actor_name,
+        read: r.read, createdAt: r.created_at
+      }))
+    });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/notifications/mark-read') {
+    const notificationId = body.notificationId ? String(body.notificationId) : null;
+    if (notificationId) {
+      await supabaseRest(`/notifications?id=eq.${encodeURIComponent(notificationId)}&user_id=eq.${encodeURIComponent(apiUser.id)}`, {
+        method: 'PATCH', body: JSON.stringify({ read: true })
+      });
+    } else {
+      await supabaseRest(`/notifications?user_id=eq.${encodeURIComponent(apiUser.id)}&read=eq.false`, {
+        method: 'PATCH', body: JSON.stringify({ read: true })
+      });
+    }
+    return sendJson(res, 200, { ok: true });
+  }
 
   if (req.method === 'GET' && url.pathname === '/api/bootstrap') {
     await generateRecurringCardsThroughToday();
@@ -2170,6 +2212,12 @@ async function handleApi(req, res, url) {
         replaceCardAssignees(card.id, card.assigneeIds)
       ]);
       board.cards.push(card);
+      if (body.notifyAssignees && card.assigneeIds.length) {
+        createNotificationsForCard({
+          cardId: card.id, boardId: board.id, cardTitle: card.title, boardName: board.name,
+          actorName: apiUser.name, assigneeIds: card.assigneeIds
+        }).catch((err) => console.error('Notification error:', err.message));
+      }
       recordAuditInBackground(body, `Creo la tarjeta "${title}" en "${board.name}"`);
       return sendJson(res, 201, { card, board });
     }
@@ -2211,6 +2259,12 @@ async function handleApi(req, res, url) {
       if (patchClientIds) junctionUpdates.push(replaceCardClients(card.id, card.clientIds));
       if (patchAssigneeIds) junctionUpdates.push(replaceCardAssignees(card.id, card.assigneeIds));
       if (junctionUpdates.length) await Promise.all(junctionUpdates);
+      if (body.notifyAssignees && card.assigneeIds.length) {
+        createNotificationsForCard({
+          cardId: card.id, boardId: board.id, cardTitle: card.title, boardName: board.name,
+          actorName: apiUser.name, assigneeIds: card.assigneeIds
+        }).catch((err) => console.error('Notification error:', err.message));
+      }
       if (previousColumnId !== card.columnId) {
         const fromColumn = board.columns.find((column) => column.id === previousColumnId);
         const toColumn = board.columns.find((column) => column.id === card.columnId);
