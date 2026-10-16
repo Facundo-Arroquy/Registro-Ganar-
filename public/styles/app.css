@@ -2413,6 +2413,15 @@ header {
   font-weight: 600;
 }
 
+/* Keep each client's three metric rows visually grouped. */
+.weekly-historical-metrics tr.weekly-client-metrics-group.is-shaded td:not(.highlight-cell) {
+  background-color: #f3f4f6;
+}
+
+.weekly-historical-metrics tr.weekly-client-metrics-group.is-unshaded td:not(.highlight-cell) {
+  background-color: #fff;
+}
+
 .weekly-slide td.editable-cell {
   background-color: #e6f7ff;
   border: 1px dashed #0066cc;

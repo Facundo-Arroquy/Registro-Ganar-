@@ -401,10 +401,10 @@ function renderClientPlanSlide(clients) {
             </tr>
           </thead>
           <tbody>
-            ${clients.map(c => metrics.map((metric, mi) => {
+            ${clients.map((c, clientIndex) => metrics.map((metric, mi) => {
               const summary = getClientSummary(c.id);
               return `
-                <tr>
+                <tr class="weekly-client-metrics-group ${clientIndex % 2 === 0 ? 'is-shaded' : 'is-unshaded'}">
                   ${mi === 0 ? `<td rowspan="3"><strong>${escapeHtml(c.company || c.name)}</strong>${renderWeeklyBreakdown(c.id)}</td>` : ''}
                   <td>${metricLabels[metric]}</td>
                   ${periods.map((period) => `<td>${formatValue(metricValue(summary, metric, period), metric)}</td>`).join('')}
