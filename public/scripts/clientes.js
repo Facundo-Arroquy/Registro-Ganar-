@@ -7,7 +7,7 @@ const currentUser = requireSession();
 let state;
 let searchTerm = '';
 let selectedOwnerId = '';
-const selectedStatuses = new Set();
+const selectedStatuses = new Set(['Plan Activo']);
 
 async function boot() {
   state = await refreshAppState();
